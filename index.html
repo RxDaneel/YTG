@@ -142,6 +142,21 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 14px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;border:0;border-radius:999px;padding:7px 13px;background:var(--raised);font-size:13px;font-weight:500}
+.banner{aspect-ratio:6/1;background:var(--surface) center/cover no-repeat;max-width:100%}
+.chead{display:flex;gap:14px;align-items:center;padding:14px 16px 6px}
+.chead img{width:64px;height:64px;border-radius:50%;object-fit:cover;background:var(--raised);flex:none}
+.chead h2{font:600 19px/1.25 var(--serif);margin:0;overflow-wrap:anywhere}
+.chead .sub{font-size:12px}
+.cabout{padding:0 16px;color:var(--muted);font-size:12.5px;line-height:1.45;white-space:pre-wrap;overflow:hidden;max-height:3em;overflow-wrap:anywhere}
+.cabout.full{max-height:none}
+.ctabs{display:flex;gap:4px;padding:12px 16px 10px;border-bottom:1px solid var(--line);position:sticky;top:52px;background:var(--bg);z-index:1}
+.ctabs button{border:0;background:none;padding:7px 12px;border-radius:999px;font-size:13px;font-weight:600;color:var(--muted)}
+.ctabs button[aria-current="true"]{background:var(--fg);color:var(--bg)}
+.row{display:flex;gap:10px;padding:8px 16px;width:100%;border:0;background:none;text-align:left}
+.row .thumb{width:44%;flex:none;border-radius:8px}
+.row .title{font-size:13.5px}
+.row .sub{font-size:11.5px}
+[data-ch]{cursor:pointer}
 .notif{display:flex;gap:12px;padding:10px 16px;width:100%;border:0;background:none;text-align:left;align-items:center}
 .notif.new{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .notif img.t{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;flex:none;background:var(--surface)}
@@ -189,6 +204,15 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   </div>
   <div class="frame" id="pFrame"></div>
   <div class="pinfo" id="pInfo"></div>
+</div>
+
+<div class="sheet" id="chan" aria-hidden="true">
+  <div class="pbar">
+    <button class="icon-btn" data-close="#chan" aria-label="Indietro"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
+    <h3 id="chTitle" style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h3>
+    <a class="icon-btn" id="chExt" target="_blank" rel="noopener" aria-label="Apri nel browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
+  </div>
+  <div id="chBody"></div>
 </div>
 
 <div class="sheet" id="notifs" aria-hidden="true">
@@ -520,7 +544,7 @@ function card(x){
   return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
     <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
       ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
-    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch))}" alt="">
+    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch))}" alt="${esc(x.chTitle)}" data-ch="${x.ch}">
       <div><div class="title">${esc(x.title)}</div><div class="sub">${bits}</div></div></div>
   </button>`;
 }
@@ -600,7 +624,7 @@ function renderChannels(status, isErr){
     ${status ? `<div class="status${isErr ? " err" : ""}">${esc(status)}</div>` : ""}
     <h2 style="margin-top:22px">I tuoi canali · ${S.channels.length}</h2>
     <div class="panel">${sorted.length ? sorted.map(c => `<div class="list-item">
-      <img class="avatar" loading="lazy" src="${esc(c.thumb)}" alt=""><span>${esc(c.title)}</span>
+      <img class="avatar" loading="lazy" src="${esc(c.thumb)}" alt="" data-ch="${c.id}"><span data-ch="${c.id}">${esc(c.title)}</span>
       <button class="x" data-del="${c.id}">Rimuovi</button></div>`).join("") : `<div class="status" style="padding:14px">Ancora nessun canale.</div>`}</div>
   </div>`;
 }
@@ -707,7 +731,12 @@ function tryFullscreen(){
 }
 matchMedia("(orientation:landscape)").addEventListener?.("change", tryFullscreen);
 let current = null, cPage = "";
-function openSheet(sel){ const p = $(sel); p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; }
+let zTop = 40;
+function openSheet(sel){ const p = $(sel); p.style.zIndex = ++zTop; p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; }
+function closeSheet(sel){
+  const p = $(sel); p.classList.remove("open"); p.setAttribute("aria-hidden", "true");
+  if (sel === "#player") setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
+}
 function closeSheets(){
   document.querySelectorAll(".sheet.open").forEach(p => { p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); });
   setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
@@ -723,7 +752,7 @@ function openVideo(id){
   const more = S.videos.filter(v => v.ch === x.ch && v.id !== id).slice(0, 5);
   $("#pInfo").innerHTML = `<h2>${esc(x.title)}</h2>
     <div class="sub">${[x.views ? views(x.views) : "", ago(x.at), x.dur ? fmtDur(x.dur) : ""].filter(Boolean).join(" · ")}</div>
-    <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt=""><b style="flex:1;min-width:0">${esc(x.chTitle)}</b>
+    <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt="" data-ch="${x.ch}"><b style="flex:1;min-width:0" data-ch="${x.ch}">${esc(x.chTitle)} ›</b>
       ${S.channels.some(c => c.id === x.ch) ? "" : `<button class="btn ghost" data-act="block" style="padding:7px 12px;font-size:13px">Non mi interessa</button>`}</div>
     ${x.desc ? `<div class="desc" id="pDesc">${esc(x.desc)}</div><button class="more" data-act="desc">Mostra tutto</button>` : ""}
     <div class="comments">
@@ -805,6 +834,134 @@ async function postComment(video, text){
   } finally { if (btn) btn.disabled = false; }
 }
 
+/* ---------- pagina del canale ---------- */
+let CH = null;   // { id, info, tab, vids, page, strict, subId, playlists }
+const isSub = id => S.channels.some(c => c.id === id);
+const subs = n => !n ? "" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln di iscritti" : n >= 1e3 ? Math.round(n/1e3) + "K iscritti" : n + " iscritti";
+
+async function openChannel(id){
+  CH = { id, tab: "videos", vids: [], page: "", strict: !S.noLF[id], playlists: null };
+  $("#chTitle").textContent = S.channels.find(c => c.id === id)?.title || "";
+  $("#chExt").href = "https://www.youtube.com/channel/" + id;
+  $("#chBody").innerHTML = `<div class="status" style="padding:20px 16px">Carico il canale…</div>`;
+  openSheet("#chan");
+  try {
+    const j = await api("channels", { part: "snippet,statistics,brandingSettings", id });
+    const c = j.items?.[0]; if (!c) throw new Error("Canale non trovato");
+    if (CH?.id !== id) return;
+    CH.info = c; $("#chTitle").textContent = c.snippet.title;
+    S.avatars[id] = S.avatars[id] || c.snippet.thumbnails?.default?.url || "";
+    renderChannelHead(); loadChanVideos(true);
+  } catch (e) { $("#chBody").innerHTML = `<div class="status err" style="padding:20px 16px">${esc(errMsg(e))}</div>`; }
+}
+
+function renderChannelHead(){
+  const c = CH.info, s = c.snippet, st = c.statistics || {};
+  const banner = c.brandingSettings?.image?.bannerExternalUrl;
+  const thumb = s.thumbnails?.medium?.url || s.thumbnails?.default?.url || "";
+  const meta = [s.customUrl || "", st.hiddenSubscriberCount ? "" : subs(+st.subscriberCount), st.videoCount ? (+st.videoCount).toLocaleString("it-IT") + " video" : ""].filter(Boolean).join(" · ");
+  $("#chBody").innerHTML = `
+    ${banner ? `<div class="banner" style="background-image:url('${esc(banner)}=w1060')"></div>` : ""}
+    <div class="chead"><img src="${esc(thumb)}" alt=""><div style="min-width:0;flex:1"><h2>${esc(s.title)}</h2><div class="sub">${esc(meta)}</div></div></div>
+    <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button></div>
+    ${s.description ? `<div class="cabout" id="cAbout">${esc(s.description)}</div><div style="padding:0 16px"><button class="more" data-act="chAbout">Altro</button></div>` : ""}
+    <div class="ctabs"><button data-ctab="videos" aria-current="${CH.tab === "videos"}">Video</button><button data-ctab="playlists" aria-current="${CH.tab === "playlists"}">Playlist</button></div>
+    <div id="chList"></div><div style="padding:4px 16px"><button class="more" id="chMoreBtn" data-act="chMore" hidden>Carica altri video</button></div>`;
+}
+
+function rowHTML(x){
+  return `<button class="row" data-v="${x.id}"><div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+    ${x.live ? `<span class="dur live">LIVE</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
+    <div style="min-width:0"><div class="title">${esc(x.title)}</div><div class="sub">${[x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ")}</div></div></button>`;
+}
+
+async function loadChanVideos(first){
+  const id = CH.id, list = $("#chList"), btn = $("#chMoreBtn");
+  if (first) list.innerHTML = `<div class="status" style="padding:12px 16px">Carico i video…</div>`;
+  const fetchPage = pl => api("playlistItems", { part: "contentDetails", playlistId: pl + id.slice(2), maxResults: 30, ...(CH.page ? { pageToken: CH.page } : {}) });
+  try {
+    let j;
+    if (CH.strict) { try { j = await fetchPage("UULF"); } catch (e) { if (e.reason === "quotaExceeded") throw e; CH.strict = false; CH.page = ""; } }
+    if (!CH.strict) j = await fetchPage("UU");
+    if (CH?.id !== id) return;
+    const det = await videoDetails((j.items || []).map(i => i.contentDetails.videoId));
+    const vids = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && (CH.strict || !looksShort(v, secs(v.contentDetails.duration)))).map(toVideo))
+      .sort((a, b) => b.at.localeCompare(a.at));
+    CH.vids = first ? vids : CH.vids.concat(vids); CH.page = j.nextPageToken || "";
+    if (CH.tab !== "videos") return;
+    list.innerHTML = CH.vids.length ? CH.vids.map(rowHTML).join("") : `<div class="status" style="padding:12px 16px">Nessun video.</div>`;
+    btn.hidden = !CH.page;
+  } catch (e) { if (CH?.id === id) list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; }
+}
+
+async function chanTab(tabName){
+  CH.tab = tabName;
+  document.querySelectorAll(".ctabs button").forEach(b => b.setAttribute("aria-current", b.dataset.ctab === tabName));
+  const list = $("#chList"), btn = $("#chMoreBtn");
+  if (tabName === "videos") { list.innerHTML = CH.vids.map(rowHTML).join(""); btn.hidden = !CH.page; return; }
+  btn.hidden = true;
+  if (!CH.playlists) {
+    list.innerHTML = `<div class="status" style="padding:12px 16px">Carico le playlist…</div>`;
+    try {
+      const j = await api("playlists", { part: "snippet,contentDetails", channelId: CH.id, maxResults: 50 });
+      CH.playlists = j.items || [];
+    } catch (e) { list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; return; }
+  }
+  if (CH.tab !== "playlists") return;
+  list.innerHTML = CH.playlists.length ? CH.playlists.map(p => {
+    const t = p.snippet.thumbnails || {};
+    return `<button class="row" data-pl="${p.id}" data-plt="${esc(p.snippet.title)}"><div class="thumb"><img loading="lazy" src="${esc((t.medium || t.default || {}).url || "")}" alt="">
+      <span class="dur">${p.contentDetails.itemCount} video</span></div>
+      <div style="min-width:0"><div class="title">${esc(p.snippet.title)}</div><div class="sub">Playlist</div></div></button>`;
+  }).join("") : `<div class="status" style="padding:12px 16px">Questo canale non ha playlist pubbliche.</div>`;
+}
+
+async function openPlaylist(plId, title){
+  const list = $("#chList");
+  list.innerHTML = `<div style="padding:8px 16px"><button class="more" data-ctab="playlists">‹ Tutte le playlist</button>
+    <div style="font:600 15px var(--serif);margin-top:4px">${esc(title)}</div></div><div id="plItems" class="status" style="padding:8px 16px">Carico…</div>`;
+  try {
+    const j = await api("playlistItems", { part: "contentDetails", playlistId: plId, maxResults: 50 });
+    const ids = (j.items || []).map(i => i.contentDetails.videoId);
+    const det = await videoDetails(ids), order = new Map(ids.map((id, i) => [id, i]));
+    const vids = remember(det.map(toVideo).sort((a, b) => order.get(a.id) - order.get(b.id)));
+    const box = $("#plItems"); if (!box) return;
+    box.className = ""; box.style.padding = "0";
+    box.innerHTML = vids.map(rowHTML).join("") || `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`;
+  } catch (e) { const box = $("#plItems"); if (box) box.innerHTML = esc(errMsg(e)); }
+}
+
+/* Iscriviti / annulla iscrizione sul tuo account YouTube (50 unità) */
+async function toggleSub(){
+  const id = CH.id, info = CH.info;
+  if (!tokenOk()) {
+    try { sessionStorage.setItem("ytg.video", current ? JSON.stringify(current) : ""); } catch {}
+    return startLogin({ do: "channel", ch: id, tab });
+  }
+  const btn = $("#subBtn"); btn.disabled = true;
+  try {
+    if (isSub(id)) {
+      const j = await apiAuth("subscriptions", { part: "id", mine: "true", forChannelId: id });
+      const sid = j.items?.[0]?.id;
+      if (sid) {
+        const r = await fetch(API + "subscriptions?id=" + encodeURIComponent(sid), { method: "DELETE", headers: { Authorization: "Bearer " + S.token } });
+        if (!r.ok && r.status !== 404) throw new Error("Errore " + r.status);
+      }
+      S.channels = S.channels.filter(c => c.id !== id); S.videos = S.videos.filter(v => v.ch !== id);
+      toast("Iscrizione annullata");
+    } else {
+      await apiAuth("subscriptions", { part: "snippet" }, { snippet: { resourceId: { kind: "youtube#channel", channelId: id } } });
+      S.channels.push({ id, title: info.snippet.title, thumb: info.snippet.thumbnails?.default?.url || "" });
+      S.lastFetch = 0; toast("Iscritto a " + info.snippet.title);
+    }
+    save(); updateBell(); rerender();
+    btn.textContent = isSub(id) ? "Iscritto ✓" : "Iscriviti"; btn.classList.toggle("ghost", isSub(id));
+  } catch (e) {
+    if (e.relogin || e.reason === "insufficientPermissions") { S.token = ""; save(); return toggleSub(); }
+    toast("Operazione non riuscita: " + errMsg(e));
+  } finally { btn.disabled = false; }
+}
+
 /* ---------- navigazione ---------- */
 const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni" };
 function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : TITLES[tab]; }
@@ -840,7 +997,11 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  const t = e.target.closest("[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  if (t.dataset.ch) return openChannel(t.dataset.ch);
+  if (t.dataset.close) return closeSheet(t.dataset.close);
+  if (t.dataset.ctab) return chanTab(t.dataset.ctab);
+  if (t.dataset.pl) return openPlaylist(t.dataset.pl, t.dataset.plt);
   if (t.dataset.tab) return go(t.dataset.tab);
   if (t.dataset.go) { closeSheets(); return go(t.dataset.go); }
   if (t.dataset.v) return openVideo(t.dataset.v);
@@ -857,6 +1018,9 @@ document.addEventListener("click", e => {
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
   if (a === "moreComments") loadComments(false);
+  if (a === "chMore") loadChanVideos(false);
+  if (a === "chAbout") { $("#cAbout").classList.add("full"); t.remove(); }
+  if (a === "subscribe") toggleSub();
   if (a === "unmute") { try { yp.unMute(); yp.setVolume(100); yp.playVideo(); } catch {} t.remove(); }
   if (a === "block" && current) {
     S.blocked[current.ch] = 1; S.home = S.home.filter(v => v.ch !== current.ch); save();
@@ -917,8 +1081,8 @@ $("#csvFile").addEventListener("change", async e => {
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
-$("#pClose").onclick = closeSheets;
-$("#nClose").onclick = closeSheets;
+$("#pClose").onclick = () => closeSheet("#player");
+$("#nClose").onclick = () => closeSheet("#notifs");
 
 /* ---------- avvio ---------- */
 const after = readLoginReturn();
@@ -926,6 +1090,8 @@ if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
   go(after.tab || "vSubs");
   if (v) { CACHE.set(v.id, v); openVideo(v.id); postComment(v, after.text); }
+} else if (after?.do === "channel") {
+  go(after.tab || "vSubs"); openChannel(after.ch).then(() => setTimeout(toggleSub, 400));
 } else if (after) { go("vChannels"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell();
