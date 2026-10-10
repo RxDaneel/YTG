@@ -1450,6 +1450,24 @@ $("#nClose").onclick = () => closeSheet("#notifs");
   }, { passive: true });
 })();
 
+/* ---------- aggiornamenti automatici dell'app ----------
+   GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
+   se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
+const BUILD = "20261010230910";
+async function checkUpdate(){
+  try {
+    const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
+    const { v } = await r.json();
+    if (v && v !== BUILD && !sessionStorage.getItem("ytg.upd." + v)) {
+      sessionStorage.setItem("ytg.upd." + v, "1");
+      await fetch(location.pathname, { cache: "reload" });
+      location.reload();
+    }
+  } catch {}
+}
+checkUpdate();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
 /* ---------- avvio ---------- */
 const after = readLoginReturn();
 if (after?.do === "comment") {
