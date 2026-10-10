@@ -50,6 +50,7 @@ header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space
 #hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 .icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
 .icon-btn:active{background:var(--raised)}
+.icon-btn.on{background:var(--raised)}
 .icon-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .badge{position:absolute;top:4px;right:3px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
 .spin svg{animation:spin 1s linear infinite}
@@ -244,6 +245,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+  <button class="icon-btn" id="btnGear" aria-label="Impostazioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
 </header>
 
 <div id="ptr" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></div>
@@ -258,8 +260,6 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <nav id="nav">
   <button data-tab="vHome" id="navHome"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button data-tab="vSubs"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M7 3.5h10M5 5.2h14"/><path d="m10.5 11 4 2.5-4 2.5z"/></svg>Iscrizioni</button>
-  <button data-tab="vChannels"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.5M18 15c1.6.7 2.6 2.3 3 5"/></svg>Canali</button>
-  <button data-tab="vSettings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Impostazioni</button>
 </nav>
 
 <div class="sheet" id="player" aria-hidden="true">
@@ -799,7 +799,7 @@ function renderSubs(){
   const v = $("#vSubs"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
   if (!S.channels.length) {
     v.innerHTML = `<div class="empty"><h2>Solo i tuoi canali</h2><p>Accedi con Google per caricare le tue iscrizioni.</p>
-      <div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button><button class="btn ghost" data-go="vChannels">Aggiungi a mano</button></div></div>`;
+      <div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button></div></div>`;
     return;
   }
   const list = S.videos.filter(x => !S.opt.hideWatched || !S.watched[x.id]);
@@ -863,7 +863,14 @@ function renderSettings(){
   const v = $("#vSettings"), o = S.opt;
   const masked = S.key ? S.key.slice(0, 6) + "…" + S.key.slice(-4) : "";
   v.innerHTML = `<div class="section">
-    <h2>Contenuti</h2>
+    <h2>Il tuo account</h2>
+    <div class="panel"><div class="list-item">
+      ${S.me ? `<img class="avatar" src="${esc(S.me.thumb)}" alt=""><span style="white-space:normal"><b>${esc(S.me.title)}</b><br><small style="color:var(--muted)">${S.channels.length} iscrizioni${S.lastSync ? " · sincronizzate " + ago(new Date(S.lastSync).toISOString()) : ""}</small></span>
+        <button class="btn" data-act="sync">Sincronizza</button>`
+      : `<span style="white-space:normal">Accedi con Google per caricare le tue iscrizioni, mettere Mi piace e commentare.</span><button class="btn" data-act="login">Accedi</button>`}
+    </div></div>
+
+    <h2 style="margin-top:22px">Contenuti</h2>
     <div class="panel">
       <label class="toggle"><div>Mostra la Home<small>Video di tendenza. Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
       <label class="toggle"><div>Paese della Home e della ricerca</div>
@@ -1422,6 +1429,7 @@ function go(t){
   $("#navHome").hidden = !S.opt.showHome;
   $("#hTitle").textContent = LABEL(t);
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
+  $("#btnGear").classList.toggle("on", t === "vSettings");
   if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome(); }
   if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
@@ -1539,6 +1547,7 @@ $("#csvFile").addEventListener("change", async e => {
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
+$("#btnGear").onclick = () => { closeSheets(); go("vSettings"); };
 $("#logo").onclick = () => { closeSheets(); go("vHome"); };
 $("#pClose").onclick = () => closeSheet("#player");
 $("#nClose").onclick = () => closeSheet("#notifs");
@@ -1575,7 +1584,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010232028";
+const BUILD = "20261010232701";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1605,7 +1614,7 @@ if (after?.do === "comment") {
   if (v) { CACHE.set(v.id, v); openVideo(v.id); }
   if (after.do === "sub") setTimeout(() => toggleSub(after.ch, after.title, after.thumb), 500);
   else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
-} else if (after) { go("vChannels"); syncSubs(); }
+} else if (after) { go("vSettings"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell();
 if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
