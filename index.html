@@ -449,7 +449,8 @@ document.addEventListener("click", async e => {
 document.addEventListener("submit", async e => {
   e.preventDefault();
   if (e.target.id === "keyForm") {
-    const k = $("#keyIn").value.trim(); if (!k) return;
+    const k = $("#keyIn").value.replace(/[\s"'`]/g, ""); if (!k) return;
+    if (!/^AIza[\w-]{35}$/.test(k)) { toast(`La chiave deve iniziare con AIza ed essere lunga 39 caratteri: questa ne ha ${k.length}. Copiala di nuovo col tasto copia della console.`); return; }
     S.key = k; save();
     try { await api("channels", { part: "id", forHandle: "@YouTube" }); toast("Chiave salvata e funzionante"); renderSettings(); if (!S.channels.length) go("vChannels"); else refresh(); }
     catch (err) { toast("La chiave non funziona: " + err.message); renderSettings(); }
