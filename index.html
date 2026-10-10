@@ -208,6 +208,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .cb:active{background:var(--raised)}
 .cb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .cb svg .f{fill:currentColor;stroke:none}
+.cb.txt.on{background:var(--fg);color:var(--bg)}
 .cb.txt{width:auto;padding:0 10px;border-radius:999px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 #cTime{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-left:6px;white-space:nowrap}
 #cSeek{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;display:block}
@@ -279,6 +280,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
         <button class="cb" data-act="cFwd" aria-label="Avanti 10 secondi"><svg viewBox="0 0 24 24"><path d="m13 6 6 6-6 6"/><path d="m6 6 6 6-6 6"/></svg></button>
         <span id="cTime">0:00 / 0:00</span>
         <span style="flex:1"></span>
+        <button class="cb txt" id="cCC" data-act="cCC" aria-label="Sottotitoli">CC</button>
         <button class="cb txt" id="cRate" data-act="cRate" aria-label="Velocità">1×</button>
         <button class="cb" id="cMute" data-act="cMute" aria-label="Audio"></button>
         <button class="cb" id="cFull" data-act="cFull" aria-label="Schermo intero"></button>
@@ -998,15 +1000,18 @@ paintCtl();
 async function startPlayer(id){
   stopPlayer();
   $("#pFrame").innerHTML = `<div id="ytp"></div>`;
+  ccOn = !!S.opt.cc; paintCC();
   const YT = await loadYTApi();
   if (current?.id !== id) return;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, fs: 0, iv_load_policy: 3, disablekb: 1 },
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, fs: 0, iv_load_policy: 3, disablekb: 1,
+      ...(S.opt.cc ? { cc_load_policy: 1, cc_lang_pref: S.opt.cc } : {}) },
     events: {
       onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) ctlShow(true); else if (e.data === 1) ctlShow(); },
       onReady: e => {
         e.target.playVideo(); paintCtl();
+        if (S.opt.cc) setTimeout(() => applyCC(S.opt.cc, S.opt.ccTr), 1500);
         setTimeout(() => {                         // se iOS ha bloccato l'audio, parte muto con pulsante per attivarlo
           if (!yp || current?.id !== id) return;
           const st = e.target.getPlayerState();
@@ -1198,6 +1203,43 @@ async function shareVideo(){
   const url = "https://youtu.be/" + current.id;
   try { if (navigator.share) { await navigator.share({ title: current.title, url }); return; } } catch (e) { if (e.name === "AbortError") return; }
   try { await navigator.clipboard.writeText(url); toast("Link copiato"); } catch { toast(url); }
+}
+
+/* ---------- sottotitoli ----------
+   Il player di YouTube li gestisce con il modulo "captions": lo carico, leggo le lingue disponibili
+   e scelgo la traccia. La scelta viene ricordata per i video successivi. */
+let ccOn = false;
+function ccTracks(){ try { return yp.getOption("captions", "tracklist") || []; } catch { return []; } }
+function applyCC(lang, tr){
+  if (!ok()) return;
+  try {
+    yp.loadModule("captions");
+    const tracks = ccTracks();
+    const pick = tracks.find(t => t.languageCode === lang) || tracks.find(t => t.languageCode?.startsWith(lang.split("-")[0])) || tracks[0];
+    if (!pick && tracks.length === 0) { ccOn = true; paintCC(); return; }      // modulo caricato, tracce ancora in arrivo
+    const opt = { languageCode: pick.languageCode };
+    if (tr && pick.languageCode !== tr) opt.translationLanguage = { languageCode: tr };
+    yp.setOption("captions", "track", opt);
+    ccOn = true;
+  } catch {}
+  paintCC();
+}
+function ccOff(){
+  try { yp.setOption("captions", "track", {}); yp.unloadModule("captions"); } catch {}
+  ccOn = false; S.opt.cc = ""; S.opt.ccTr = ""; save(); paintCC();
+}
+function paintCC(){ $("#cCC")?.classList.toggle("on", ccOn); }
+async function ccMenu(){
+  if (!ok()) return;
+  try { yp.loadModule("captions"); } catch {}
+  let tracks = ccTracks();
+  for (let i = 0; i < 8 && !tracks.length; i++) { await new Promise(r => setTimeout(r, 250)); tracks = ccTracks(); }
+  if (!tracks.length) { if (!ccOn) { try { yp.unloadModule("captions"); } catch {} } toast("Questo video non ha sottotitoli"); return; }
+  const items = tracks.slice(0, 12).map(t => ["cc:" + t.languageCode, (t.displayName || t.languageName || t.languageCode) + (t.kind === "asr" ? " (automatici)" : "")]);
+  if (!tracks.some(t => t.languageCode?.startsWith("it"))) items.push(["cc:" + tracks[0].languageCode + ":it", "Traduci in italiano"]);
+  if (ccOn) items.push(["ccOff", "Disattiva sottotitoli"]);
+  items.push(["closeMenu", "Annulla"]);
+  showMenu(items);
 }
 
 function showMenu(items){
@@ -1480,6 +1522,13 @@ document.addEventListener("click", e => {
   if (a === "share") shareVideo();
   if (a === "vmenu") videoMenu();
   if (a === "closeMenu") closeMenu();
+  if (a === "cCC") { ctlShow(true); return ccMenu(); }
+  if (a === "ccOff") { closeMenu(); return ccOff(); }
+  if (a && a.startsWith("cc:")) {
+    closeMenu(); const [, lang, tr] = a.split(":");
+    S.opt.cc = lang; S.opt.ccTr = tr || ""; save(); applyCC(lang, tr);
+    return toast(tr ? "Sottotitoli tradotti in italiano" : "Sottotitoli attivi");
+  }
   if (a === "copyLink") { closeMenu(); navigator.clipboard?.writeText("https://youtu.be/" + current.id).then(() => toast("Link copiato"), () => toast("https://youtu.be/" + current.id)); }
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
   if (a === "relSearch") searchRelated();
@@ -1584,7 +1633,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010232701";
+const BUILD = "20261010233009";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
