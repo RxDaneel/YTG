@@ -260,24 +260,22 @@ async function resolveChannel(input){
   return j.items[0].id;
 }
 
-/* Playlist "UULF" = solo video normali (niente Shorts, niente dirette). Se non esiste, si usa "UU" + filtro durata. */
+/* Playlist "UULF" = solo video normali (niente Shorts, niente dirette). Se non esiste, si usa "UU" + filtro durata.
+   I canali senza UULF vengono ricordati, così la volta dopo si fa una sola richiesta. */
 async function channelUploads(ch){
   const tail = ch.id.slice(2), n = S.opt.perChannel;
-  try {
-    const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: n });
-    let ids = (j.items || []).map(i => i.contentDetails.videoId);
-    if (S.opt.showLive) {
-      try {
-        const l = await api("playlistItems", { part: "contentDetails", playlistId: "UULV" + tail, maxResults: 3 });
-        ids = ids.concat((l.items || []).map(i => i.contentDetails.videoId));
-      } catch {}
+  S.noLF = S.noLF || {};
+  if (!S.noLF[ch.id]) {
+    try {
+      const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: n });
+      return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: true };
+    } catch (e) {
+      if (e.reason === "quotaExceeded" || /API key|referer|keyInvalid/i.test(e.message)) throw e;
+      S.noLF[ch.id] = 1;
     }
-    return { ids, strict: true };
-  } catch (e) {
-    if (e.reason === "quotaExceeded" || /API key|referer|keyInvalid/i.test(e.message)) throw e;
-    const j = await api("playlistItems", { part: "contentDetails", playlistId: "UU" + tail, maxResults: n });
-    return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: false };
   }
+  const j = await api("playlistItems", { part: "contentDetails", playlistId: "UU" + tail, maxResults: n });
+  return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: false };
 }
 
 function secs(iso){
@@ -293,41 +291,44 @@ async function pool(items, size, fn){
   return out;
 }
 
+function progress(done, total){
+  $("#hTitle").textContent = total ? `Aggiorno ${done}/${total}` : TITLES[tab];
+}
+
 async function refresh(manual){
   if (busy) return;
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
   if (!S.channels.length) { if (manual) toast("Nessun canale: importali dalla scheda Canali"); return; }
   busy = true; $("#btnRefresh").classList.add("spin");
+  const total = S.channels.length; let done = 0; progress(0, total);
   try {
-    const res = await pool(S.channels, 6, channelUploads);
+    const res = await pool(S.channels, 16, ch => channelUploads(ch).finally(() => progress(++done, total)));
     const firstErr = res.find(r => r?.error)?.error;
     if (firstErr && res.every(r => r?.error)) throw firstErr;
     const lax = new Set(); const all = [];
     res.forEach(r => { if (r?.ids) { all.push(...r.ids); if (!r.strict) r.ids.forEach(id => lax.add(id)); } });
-    const ids = [...new Set(all)], vids = [];
-    for (let i = 0; i < ids.length; i += 50) {
-      const j = await api("videos", { part: "snippet,contentDetails", id: ids.slice(i, i + 50).join(",") });
-      for (const v of j.items || []) {
-        const d = secs(v.contentDetails.duration), live = v.snippet.liveBroadcastContent;
-        if (lax.has(v.id) && d > 0 && d <= 180) continue;          // probabile Short
-        if (live === "upcoming") continue;                            // anteprime non ancora iniziate
-        if (!S.opt.showLive && live === "live") continue;
-        const t = v.snippet.thumbnails;
-        vids.push({ id: v.id, title: v.snippet.title, ch: v.snippet.channelId, chTitle: v.snippet.channelTitle,
-          at: v.snippet.publishedAt, dur: d, live: live === "live",
-          thumb: (t.maxres || t.standard || t.high || t.medium || t.default).url,
-          desc: (v.snippet.description || "").slice(0, 3000) });
-      }
+    const ids = [...new Set(all)], batches = [];
+    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+    const pages = await pool(batches, 8, b => api("videos", { part: "snippet,contentDetails", id: b.join(",") }));
+    const vids = [];
+    for (const j of pages) for (const v of j?.items || []) {
+      const d = secs(v.contentDetails.duration), live = v.snippet.liveBroadcastContent;
+      if (lax.has(v.id) && d > 0 && d <= 180) continue;          // probabile Short
+      if (live === "upcoming") continue;                            // anteprime non ancora iniziate
+      const t = v.snippet.thumbnails;
+      vids.push({ id: v.id, title: v.snippet.title, ch: v.snippet.channelId, chTitle: v.snippet.channelTitle,
+        at: v.snippet.publishedAt, dur: d, live: live === "live",
+        thumb: (t.maxres || t.standard || t.high || t.medium || t.default).url,
+        desc: (v.snippet.description || "").slice(0, 3000) });
     }
     vids.sort((a, b) => b.at.localeCompare(a.at));
-    S.videos = vids; S.lastFetch = Date.now(); save(); renderFeed();
+    S.videos = vids; S.lastFetch = Date.now(); lastError = ""; save(); renderFeed();
     if (firstErr) toast("Alcuni canali non si sono aggiornati");
     else if (manual) toast("Feed aggiornato");
-    lastError = "";
   } catch (e) {
     lastError = e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message;
     toast(lastError); renderFeed();
-  } finally { busy = false; $("#btnRefresh").classList.remove("spin"); }
+  } finally { busy = false; $("#btnRefresh").classList.remove("spin"); progress(0, 0); }
 }
 
 /* ---------- formattazione ---------- */
@@ -444,12 +445,11 @@ function renderSettings(){
     <h2 style="margin-top:22px">Feed</h2>
     <div class="panel">
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
-      <label class="toggle"><div>Mostra dirette<small>Le dirette in corso dei tuoi canali</small></div><input type="checkbox" class="switch" id="o_live" ${o.showLive ? "checked" : ""}></label>
       <label class="toggle"><div>Video per canale<small>Più video = più storico, stessa quota</small></div>
         <select id="o_n" style="background:var(--raised);border:0;border-radius:8px;padding:6px 8px;color:var(--fg)">
           ${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
-    <div class="help" style="margin-top:10px">Gli Shorts e i consigliati non esistono in quest'app. Ogni aggiornamento usa circa ${S.channels.length * (o.showLive ? 2 : 1) + Math.ceil(S.channels.length * o.perChannel / 50)} unità delle 10.000 gratuite al giorno.</div>
+    <div class="help" style="margin-top:10px">Gli Shorts e i consigliati non esistono in quest'app. Ogni aggiornamento usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)} unità delle 10.000 gratuite al giorno.</div>
 
     <h2 style="margin-top:22px">Dati</h2>
     <div class="panel">
@@ -555,7 +555,6 @@ document.addEventListener("submit", async e => {
 document.addEventListener("change", e => {
   const id = e.target.id;
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
-  if (id === "o_live") { S.opt.showLive = e.target.checked; S.lastFetch = 0; save(); renderSettings(); }
   if (id === "o_n") { S.opt.perChannel = +e.target.value; S.lastFetch = 0; save(); renderSettings(); }
 });
 
