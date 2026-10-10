@@ -151,7 +151,8 @@ const LS = "ytg.v1";
 
 /* ---------- stato ---------- */
 const S = Object.assign({
-  key: "", channels: [], videos: [], lastFetch: 0, watched: {},
+  key: "", clientId: "", token: "", tokenExp: 0, me: null, lastSync: 0,
+  channels: [], videos: [], lastFetch: 0, watched: {},
   opt: { hideWatched: false, showLive: true, perChannel: 8 }
 }, load());
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
@@ -177,6 +178,65 @@ async function api(path, params){
     e.status = r.status; e.reason = j.error?.errors?.[0]?.reason; throw e;
   }
   return j;
+}
+
+/* ---------- accesso Google (OAuth, sola lettura) ---------- */
+const SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
+const redirectUri = () => location.origin + location.pathname.replace(/index\.html$/, "");
+const tokenOk = () => S.token && Date.now() < S.tokenExp - 60000;
+
+function startLogin(){
+  if (!S.clientId) { toast("Prima inserisci l'ID client in Impostazioni"); go("vSettings"); return; }
+  const state = Math.random().toString(36).slice(2);
+  try { sessionStorage.setItem("ytg.state", state); } catch {}
+  const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: "token",
+    scope: SCOPE, include_granted_scopes: "true", state, ...(S.me ? {} : { prompt: "select_account" }) });
+  location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p;
+}
+
+function readLoginReturn(){
+  if (!location.hash.includes("access_token") && !location.hash.includes("error=")) return false;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, "", location.pathname);
+  if (h.get("error")) { setTimeout(() => toast("Accesso annullato: " + h.get("error")), 300); return false; }
+  let st = null; try { st = sessionStorage.getItem("ytg.state"); } catch {}
+  if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return false; }
+  S.token = h.get("access_token"); S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
+  return true;
+}
+
+async function apiAuth(path, params){
+  const r = await fetch(API + path + "?" + new URLSearchParams(params), { headers: { Authorization: "Bearer " + S.token } });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { S.token = ""; save(); throw new Error("Sessione scaduta: accedi di nuovo"); }
+  if (!r.ok) throw new Error(j.error?.message || ("Errore " + r.status));
+  return j;
+}
+
+async function syncSubs(){
+  if (!tokenOk()) return startLogin();
+  if (busy) return;
+  busy = true; $("#btnRefresh").classList.add("spin");
+  try {
+    const me = await apiAuth("channels", { part: "snippet", mine: "true" });
+    const c = me.items?.[0];
+    S.me = c ? { title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url || "" } : { title: "Account Google", thumb: "" };
+    const subs = []; let page = "";
+    do {
+      const j = await apiAuth("subscriptions", { part: "snippet", mine: "true", maxResults: 50, order: "alphabetical", ...(page ? { pageToken: page } : {}) });
+      for (const s of j.items || []) subs.push({ id: s.snippet.resourceId.channelId, title: s.snippet.title,
+        thumb: s.snippet.thumbnails?.default?.url || "" });
+      page = j.nextPageToken || "";
+    } while (page);
+    const manual = S.channels.filter(c => c.manual && !subs.some(s => s.id === c.id));
+    S.channels = subs.concat(manual);
+    S.videos = S.videos.filter(v => S.channels.some(c => c.id === v.ch));
+    S.lastSync = Date.now(); S.lastFetch = 0; save();
+    toast(`Iscrizioni sincronizzate: ${subs.length} canali`);
+  } catch (e) { toast(e.message); }
+  finally { busy = false; $("#btnRefresh").classList.remove("spin"); }
+  if (tab === "vChannels") renderChannels(); else if (tab === "vSettings") renderSettings();
+  refresh();
 }
 
 async function channelInfo(ids){
@@ -295,8 +355,9 @@ function renderFeed(){
   const v = $("#vFeed");
   if (!S.key || !S.channels.length) {
     v.innerHTML = `<div class="empty"><h2>Solo i tuoi canali</h2>
-      <p>Nessuna home, nessun consigliato, nessuno Short. ${!S.key ? "Per iniziare aggiungi la chiave API." : "Ora importa i canali a cui sei iscritto."}</p>
-      <div class="row-btns"><button class="btn" data-go="${!S.key ? "vSettings" : "vChannels"}">${!S.key ? "Aggiungi chiave API" : "Importa canali"}</button></div></div>`;
+      <p>Nessuna home, nessun consigliato, nessuno Short. ${!S.key ? "Per iniziare aggiungi la chiave API." : "Ora accedi con Google per caricare le tue iscrizioni."}</p>
+      <div class="row-btns">${!S.key ? `<button class="btn" data-go="vSettings">Aggiungi chiave API</button>`
+        : `<button class="btn" data-act="login">Accedi con Google</button><button class="btn ghost" data-go="vChannels">Aggiungi a mano</button>`}</div></div>`;
     return;
   }
   const q = query.toLowerCase();
@@ -325,7 +386,13 @@ function renderChannels(status, isErr){
   const v = $("#vChannels");
   const sorted = [...S.channels].sort((a, b) => a.title.localeCompare(b.title));
   v.innerHTML = `<div class="section">
-    <h2>Aggiungi un canale</h2>
+    <h2>Il tuo account</h2>
+    <div class="panel"><div class="list-item">
+      ${S.me ? `<img class="avatar" src="${esc(S.me.thumb)}" alt=""><span style="white-space:normal"><b>${esc(S.me.title)}</b><br><small style="color:var(--muted)">${S.lastSync ? "Sincronizzato " + ago(new Date(S.lastSync).toISOString()) : ""}</small></span>
+        <button class="btn" data-act="sync">Sincronizza</button>`
+      : `<span style="white-space:normal">Accedi per caricare automaticamente i canali a cui sei iscritto.</span><button class="btn" data-act="login">Accedi</button>`}
+    </div></div>
+    <h2 style="margin-top:22px">Aggiungi un canale</h2>
     <div class="panel"><form class="field" id="addForm">
       <input id="addIn" placeholder="@nomecanale o link del canale" autocapitalize="off" autocorrect="off">
       <button class="btn" type="submit">Aggiungi</button></form></div>
@@ -357,6 +424,19 @@ function renderSettings(){
       <li>In <b>Credenziali → Crea credenziali → Chiave API</b>, copia la chiave e incollala qui.</li>
       <li>Consigliato: limita la chiave a questo sito (Restrizioni applicazione → Siti web → <code>${esc(location.host || "tuosito")}/*</code>).</li>
     </ol>La chiave resta solo su questo telefono, non nel codice del sito.</div>
+
+    <h2 style="margin-top:22px">Accesso con Google</h2>
+    <div class="panel"><form class="field" id="clientForm">
+      <input id="clientIn" placeholder="${S.clientId ? "Salvato: …" + esc(S.clientId.slice(-30)) : "ID client OAuth"}" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="btn" type="submit">Salva</button></form></div>
+    <div class="help"><ol>
+      <li>Nella console apri <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a> → <b>Inizia</b>: nome app <b>YTG</b>, la tua email, pubblico <b>Esterno</b>, poi crea.</li>
+      <li>In <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">Pubblico</a> → <b>Utenti di test</b> aggiungi la tua email Google.</li>
+      <li>In <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Client</a> → <b>Crea client</b> → tipo <b>Applicazione web</b>.<br>
+        Origini JavaScript autorizzate: <code>${esc(location.origin)}</code><br>
+        URI di reindirizzamento autorizzati: <code>${esc(redirectUri())}</code></li>
+      <li>Copia l'<b>ID client</b> (finisce con <code>.apps.googleusercontent.com</code>) e incollalo qui.</li>
+    </ol>Al primo accesso Google avvisa che l'app non è verificata: tocca <b>Continua</b>, è la tua.</div>
 
     <h2 style="margin-top:22px">Feed</h2>
     <div class="panel">
@@ -420,7 +500,7 @@ async function addChannels(ids, label){
   if (!fresh.length) { renderChannels("Erano già tutti nella lista."); return; }
   renderChannels(label);
   const info = await channelInfo(fresh);
-  S.channels.push(...info); save();
+  S.channels.push(...info.map(c => ({ ...c, manual: true }))); save();
   renderChannels(`Aggiunti ${info.length} canali.`);
   S.lastFetch = 0; refresh();
 }
@@ -437,6 +517,8 @@ document.addEventListener("click", async e => {
   }
   const a = t.dataset.act;
   if (a === "refresh") refresh(true);
+  if (a === "login") startLogin();
+  if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
   if (a === "desc") { $("#pDesc").classList.add("full"); t.remove(); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
@@ -454,6 +536,11 @@ document.addEventListener("submit", async e => {
     S.key = k; save();
     try { await api("channels", { part: "id", forHandle: "@YouTube" }); toast("Chiave salvata e funzionante"); renderSettings(); if (!S.channels.length) go("vChannels"); else refresh(); }
     catch (err) { toast("La chiave non funziona: " + err.message); renderSettings(); }
+  }
+  if (e.target.id === "clientForm") {
+    const c = $("#clientIn").value.replace(/\s/g, ""); if (!c) return;
+    if (!/\.apps\.googleusercontent\.com$/.test(c)) { toast("L'ID client deve finire con .apps.googleusercontent.com"); return; }
+    S.clientId = c; S.token = ""; save(); toast("ID client salvato"); renderSettings(); return;
   }
   if (e.target.id === "addForm") {
     const v = $("#addIn").value; if (!v.trim()) return;
@@ -485,8 +572,10 @@ $("#btnSearch").onclick = () => {
 $("#q").addEventListener("input", e => { query = e.target.value; renderFeed(); });
 $("#pClose").onclick = closeVideo;
 
-go("vFeed");
-if (Date.now() - S.lastFetch > 20 * 60 * 1000) refresh();
+const justLoggedIn = readLoginReturn();
+go(justLoggedIn ? "vChannels" : "vFeed");
+if (justLoggedIn) syncSubs();
+else if (Date.now() - S.lastFetch > 20 * 60 * 1000) refresh();
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && Date.now() - S.lastFetch > 20 * 60 * 1000) refresh();
 });
