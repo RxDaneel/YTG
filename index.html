@@ -235,7 +235,6 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .land #player.open .ctl.show,.full #player.open .ctl.show{opacity:1}
 .land #player.open .ctl.show :is(button,input),.full #player.open .ctl.show :is(button,input){pointer-events:auto}
 .land #player.open .reveal,.full #player.open .reveal{display:block;position:absolute;left:0;bottom:0;width:35%;height:46px;z-index:2}
-.full:not(.land) #player.open .pwrap{width:var(--vh,100vh);height:var(--vw,100vw);transform-origin:top left;transform:translateX(var(--vw,100vw)) rotate(90deg)}
 .full #player.open{overflow:hidden;padding:0;background:#000}
 .full #player.open .pbar,.full #player.open .pinfo{display:none}
 .full:not(.land) #player.open .frame{width:100%;height:100%;aspect-ratio:auto}
@@ -1052,7 +1051,7 @@ function applyLand(){
   root.style.setProperty("--vh", innerHeight + "px"); root.style.setProperty("--vw", innerWidth + "px");
   if (land !== root.classList.contains("land")) {
     root.classList.toggle("land", land);
-    if (land) { $("#player").scrollTop = 0; root.classList.remove("full"); ctlShow(); }
+    if (land) { $("#player").scrollTop = 0; ctlShow(); }
     tryFullscreen();
   }
 }
@@ -1800,7 +1799,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010234118";
+const BUILD = "20261010234444";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
