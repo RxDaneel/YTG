@@ -195,10 +195,36 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bot) + var(--nav-h) + 14px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:12px;z-index:60;font-size:14px;max-width:calc(100% - 32px)}
 .frame{position:relative}
 #unmute{position:absolute;left:12px;bottom:12px;z-index:3;border:0;border-radius:999px;padding:8px 14px;background:rgba(20,20,19,.85);color:#fff;font-size:13px;font-weight:600}
+/* controlli propri sotto al video (verticale) o sopra in basso (schermo intero) */
+.pwrap{position:relative;background:#000}
+.ctl{background:var(--bg);padding:2px 6px 6px}
+.crow{display:flex;align-items:center;gap:2px;min-width:0}
+.cb{width:40px;height:40px;border:0;background:none;border-radius:50%;display:grid;place-items:center;color:var(--fg);flex:none}
+.cb:active{background:var(--raised)}
+.cb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cb svg .f{fill:currentColor;stroke:none}
+.cb.txt{width:auto;padding:0 10px;border-radius:999px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+#cTime{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-left:6px;white-space:nowrap}
+#cSeek{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;display:block}
+#cSeek::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:linear-gradient(to right,var(--fg) var(--p,0%),var(--line) var(--p,0%))}
+#cSeek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--fg);margin-top:-5px}
+#cSeek::-moz-range-track{height:3px;background:var(--line)}
+#cSeek::-moz-range-progress{height:3px;background:var(--fg)}
+.reveal{display:none}
+.land #player.open .pwrap,.full #player.open .pwrap{position:absolute;left:0;top:0;width:100%;height:var(--vh,100vh);z-index:5}
+.land #player.open .ctl,.full #player.open .ctl{position:absolute;left:0;right:0;bottom:0;padding:24px 14px calc(var(--bot) + 8px);
+  background:linear-gradient(transparent,rgba(0,0,0,.75));opacity:0;transition:opacity .25s;pointer-events:none;--fg:#fff;--line:rgba(255,255,255,.35);--muted:rgba(255,255,255,.8)}
+.land #player.open .ctl.show,.full #player.open .ctl.show{opacity:1}
+.land #player.open .ctl.show :is(button,input),.full #player.open .ctl.show :is(button,input){pointer-events:auto}
+.land #player.open .reveal,.full #player.open .reveal{display:block;position:absolute;left:0;bottom:0;width:35%;height:46px;z-index:2}
+.full:not(.land) #player.open .pwrap{width:var(--vh,100vh);height:var(--vw,100vw);transform-origin:top left;transform:translateX(var(--vw,100vw)) rotate(90deg)}
+.full #player.open{overflow:hidden;padding:0;background:#000}
+.full #player.open .pbar,.full #player.open .pinfo{display:none}
+.full:not(.land) #player.open .frame{width:100%;height:100%;aspect-ratio:auto}
 /* telefono in orizzontale: il player occupa tutto lo schermo, il resto si nasconde */
 .land #player.open{overflow:hidden;padding:0;background:#000}
 .land #player.open .pbar,.land #player.open .pinfo{display:none}
-.land #player.open .frame{width:100%;height:var(--vh,100vh);aspect-ratio:auto;max-width:none}
+.land #player.open .frame{width:100%;height:100%;aspect-ratio:auto;max-width:none}
 #ptr{position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
   background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.3);display:grid;place-items:center;opacity:0;transform:translateY(-50px);pointer-events:none}
 #ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
@@ -238,7 +264,23 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
     <span style="flex:1"></span>
     <a class="icon-btn" id="pExt" target="_blank" rel="noopener" aria-label="Apri nel browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
   </div>
-  <div class="frame" id="pFrame"></div>
+  <div class="pwrap" id="pWrap">
+    <div class="frame" id="pFrame"></div>
+    <div class="reveal" data-act="ctlShow"></div>
+    <div class="ctl" id="pCtl">
+      <input type="range" id="cSeek" min="0" max="1000" value="0" step="1" aria-label="Posizione">
+      <div class="crow">
+        <button class="cb" id="cPlay" data-act="cPlay" aria-label="Riproduci o metti in pausa"></button>
+        <button class="cb" data-act="cBack" aria-label="Indietro 10 secondi"><svg viewBox="0 0 24 24"><path d="M11 6 5 12l6 6"/><path d="M18 6l-6 6 6 6"/></svg></button>
+        <button class="cb" data-act="cFwd" aria-label="Avanti 10 secondi"><svg viewBox="0 0 24 24"><path d="m13 6 6 6-6 6"/><path d="m6 6 6 6-6 6"/></svg></button>
+        <span id="cTime">0:00 / 0:00</span>
+        <span style="flex:1"></span>
+        <button class="cb txt" id="cRate" data-act="cRate" aria-label="Velocità">1×</button>
+        <button class="cb" id="cMute" data-act="cMute" aria-label="Audio"></button>
+        <button class="cb" id="cFull" data-act="cFull" aria-label="Schermo intero"></button>
+      </div>
+    </div>
+  </div>
   <div class="pinfo" id="pInfo"></div>
 </div>
 
@@ -763,7 +805,63 @@ function loadYTApi(){
   return ytApi;
 }
 loadYTApi();
-function stopPlayer(){ try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; }
+function stopPlayer(){ try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; document.documentElement.classList.remove("full"); }
+
+/* ---------- controlli del player ---------- */
+const CI = {
+  play: '<svg viewBox="0 0 24 24"><path class="f" d="M7 4.5v15l12.5-7.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect class="f" x="6" y="4.5" width="4" height="15" rx="1"/><rect class="f" x="14" y="4.5" width="4" height="15" rx="1"/></svg>',
+  vol: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  mute: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="m16 9.5 5 5m0-5-5 5"/></svg>',
+  full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>',
+  exit: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>'
+};
+let seeking = false, ctlTimer = 0;
+const ok = () => yp && typeof yp.getPlayerState === "function";
+function paintCtl(){
+  if (!ok()) { $("#cPlay").innerHTML = CI.play; $("#cMute").innerHTML = CI.vol; $("#cFull").innerHTML = CI.full; return; }
+  const st = yp.getPlayerState();
+  $("#cPlay").innerHTML = st === 1 || st === 3 ? CI.pause : CI.play;
+  $("#cMute").innerHTML = yp.isMuted?.() ? CI.mute : CI.vol;
+  $("#cRate").textContent = (yp.getPlaybackRate?.() || 1).toString().replace(".", ",") + "×";
+  $("#cFull").innerHTML = document.documentElement.classList.contains("full") ? CI.exit : CI.full;
+}
+function tick(){
+  if (!ok() || seeking) return;
+  const d = yp.getDuration?.() || 0, t = yp.getCurrentTime?.() || 0, s = $("#cSeek");
+  const pc = d ? t / d * 1000 : 0; s.value = pc; s.style.setProperty("--p", pc / 10 + "%");
+  $("#cTime").textContent = fmtDur(Math.floor(t)) + " / " + fmtDur(Math.floor(d));
+}
+setInterval(tick, 400);
+function ctlShow(stay){
+  const c = $("#pCtl"); c.classList.add("show"); clearTimeout(ctlTimer);
+  if (!stay) ctlTimer = setTimeout(() => { if (ok() && yp.getPlayerState() === 1) c.classList.remove("show"); }, 3000);
+}
+function ctl(a){
+  if (!ok()) return;
+  ctlShow();
+  if (a === "cPlay") { const st = yp.getPlayerState(); st === 1 || st === 3 ? yp.pauseVideo() : yp.playVideo(); }
+  if (a === "cBack") yp.seekTo(Math.max(0, yp.getCurrentTime() - 10), true);
+  if (a === "cFwd") yp.seekTo(Math.min(yp.getDuration() - 1, yp.getCurrentTime() + 10), true);
+  if (a === "cMute") { if (yp.isMuted()) { yp.unMute(); yp.setVolume(100); $("#unmute")?.remove(); } else yp.mute(); }
+  if (a === "cRate") {
+    const av = (yp.getAvailablePlaybackRates?.() || [1]).filter(r => [0.75, 1, 1.25, 1.5, 1.75, 2].includes(r));
+    const cur = yp.getPlaybackRate(), i = av.indexOf(cur); yp.setPlaybackRate(av[(i + 1) % av.length] || 1);
+  }
+  if (a === "cFull") { document.documentElement.classList.toggle("full"); $("#player").scrollTop = 0; }
+  setTimeout(() => { paintCtl(); tick(); }, 150);
+}
+$("#cSeek").addEventListener("input", e => {
+  seeking = true; ctlShow(true);
+  const d = ok() ? yp.getDuration() : 0, t = e.target.value / 1000 * d;
+  e.target.style.setProperty("--p", e.target.value / 10 + "%");
+  $("#cTime").textContent = fmtDur(Math.floor(t)) + " / " + fmtDur(Math.floor(d));
+});
+$("#cSeek").addEventListener("change", e => {
+  if (ok()) yp.seekTo(e.target.value / 1000 * yp.getDuration(), true);
+  seeking = false; ctlShow();
+});
+paintCtl();
 async function startPlayer(id){
   stopPlayer();
   $("#pFrame").innerHTML = `<div id="ytp"></div>`;
@@ -771,16 +869,17 @@ async function startPlayer(id){
   if (current?.id !== id) return;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, fs: 0, iv_load_policy: 3, disablekb: 1 },
     events: {
+      onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) ctlShow(true); else if (e.data === 1) ctlShow(); },
       onReady: e => {
-        e.target.playVideo();
+        e.target.playVideo(); paintCtl();
         setTimeout(() => {                         // se iOS ha bloccato l'audio, parte muto con pulsante per attivarlo
           if (!yp || current?.id !== id) return;
           const st = e.target.getPlayerState();
           if (st !== 1 && st !== 3) {
             e.target.mute(); e.target.playVideo();
-            $("#pFrame").insertAdjacentHTML("beforeend", `<button id="unmute" data-act="unmute">🔈 Attiva audio</button>`);
+            $("#pFrame").insertAdjacentHTML("beforeend", `<button id="unmute" data-act="unmute">🔈 Attiva audio</button>`); paintCtl();
           }
         }, 1200);
       }
@@ -797,10 +896,10 @@ function tryFullscreen(){
 }
 function applyLand(){
   const land = innerWidth > innerHeight && innerHeight < 600, root = document.documentElement;
-  root.style.setProperty("--vh", innerHeight + "px");
+  root.style.setProperty("--vh", innerHeight + "px"); root.style.setProperty("--vw", innerWidth + "px");
   if (land !== root.classList.contains("land")) {
     root.classList.toggle("land", land);
-    if (land) $("#player").scrollTop = 0;
+    if (land) { $("#player").scrollTop = 0; root.classList.remove("full"); ctlShow(); }
     tryFullscreen();
   }
 }
@@ -1256,6 +1355,8 @@ document.addEventListener("click", e => {
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
   if (a === "relSearch") searchRelated();
   if (a === "openComments") { $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : ""); openSheet("#cmts"); }
+  if (/^c(Play|Back|Fwd|Mute|Rate|Full)$/.test(a)) return ctl(a);
+  if (a === "ctlShow") return ctlShow();
   if (a === "unmute") { try { yp.unMute(); yp.setVolume(100); yp.playVideo(); } catch {} t.remove(); }
   if (a === "block" && current) {
     S.blocked[current.ch] = 1; S.home = S.home.filter(v => v.ch !== current.ch); save();
