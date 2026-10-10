@@ -110,7 +110,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .status{font-size:12.5px;color:var(--muted);padding:6px 4px}
 .status.err{color:var(--danger)}
 
-.sheet{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;
+.sheet{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y;
   padding-top:var(--top);padding-bottom:calc(var(--bot) + 24px);transform:translateY(100%);transition:transform .28s ease;visibility:hidden}
 .sheet.open{transform:none;visibility:visible}
 .pbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--bg)}
@@ -195,10 +195,10 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bot) + var(--nav-h) + 14px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:12px;z-index:60;font-size:14px;max-width:calc(100% - 32px)}
 .frame{position:relative}
 #unmute{position:absolute;left:12px;bottom:12px;z-index:3;border:0;border-radius:999px;padding:8px 14px;background:rgba(20,20,19,.85);color:#fff;font-size:13px;font-weight:600}
-@media (orientation:landscape) and (max-height:600px){
-  #player.open{overflow:hidden;padding:0}
-  #player.open .frame{position:fixed;inset:0;z-index:100;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;max-width:none}
-}
+/* telefono in orizzontale: il player occupa tutto lo schermo, il resto si nasconde */
+.land #player.open{overflow:hidden;padding:0;background:#000}
+.land #player.open .pbar,.land #player.open .pinfo{display:none}
+.land #player.open .frame{width:100%;height:var(--vh,100vh);aspect-ratio:auto;max-width:none}
 #ptr{position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
   background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.3);display:grid;place-items:center;opacity:0;transform:translateY(-50px);pointer-events:none}
 #ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
@@ -210,7 +210,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <body>
 
 <header>
-  <h1><button class="logo" id="logo" aria-label="YT-, vai alle iscrizioni">YT-</button><span id="hTitle"></span></h1>
+  <h1><button class="logo" id="logo" aria-label="YT-, vai alla Home">YT-</button><span id="hTitle"></span></h1>
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
@@ -789,13 +789,25 @@ async function startPlayer(id){
 }
 function tryFullscreen(){
   if (!$("#player").classList.contains("open")) return;
-  const land = matchMedia("(orientation:landscape)").matches, f = $("#pFrame");
+  const land = document.documentElement.classList.contains("land"), f = $("#pFrame");
   try {
     if (land && f.requestFullscreen && !document.fullscreenElement) f.requestFullscreen().catch(() => {});
     if (!land && document.fullscreenElement) document.exitFullscreen().catch(() => {});
   } catch {}
 }
-matchMedia("(orientation:landscape)").addEventListener?.("change", tryFullscreen);
+function applyLand(){
+  const land = innerWidth > innerHeight && innerHeight < 600, root = document.documentElement;
+  root.style.setProperty("--vh", innerHeight + "px");
+  if (land !== root.classList.contains("land")) {
+    root.classList.toggle("land", land);
+    if (land) $("#player").scrollTop = 0;
+    tryFullscreen();
+  }
+}
+addEventListener("resize", applyLand);
+addEventListener("orientationchange", () => setTimeout(applyLand, 300));
+screen.orientation?.addEventListener?.("change", () => setTimeout(applyLand, 300));
+applyLand();
 let current = null, cPage = "";
 let zTop = 40;
 function openSheet(sel){ const p = $(sel); p.style.zIndex = ++zTop; p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; }
@@ -1304,7 +1316,7 @@ $("#csvFile").addEventListener("change", async e => {
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
-$("#logo").onclick = () => { closeSheets(); go("vSubs"); };
+$("#logo").onclick = () => { closeSheets(); go("vHome"); };
 $("#pClose").onclick = () => closeSheet("#player");
 $("#nClose").onclick = () => closeSheet("#notifs");
 
