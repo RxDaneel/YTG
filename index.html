@@ -17,7 +17,7 @@
 /* App a colonna singola: barra in alto, contenuto, tab bar fissata al fondo. Palette calda in stile Claude. */
 :root{
   --bg:#f3f1ea; --surface:#e9e6dc; --raised:#dfdbcf; --line:#d6d1c4;
-  --fg:#141413; --muted:#65635c; --accent:#b8583a; --on-accent:#fff; --danger:#a53f2a;
+  --fg:#141413; --muted:#65635c; --accent:#3b3b38; --on-accent:#f5f4ef; --danger:#c43c3c;
   --glass:rgba(243,241,234,.92);
   --font:Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
   --serif:var(--font);
@@ -26,7 +26,7 @@
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#1a1a19; --surface:#242422; --raised:#2e2e2b; --line:#353532;
-  --fg:#f5f4ef; --muted:#9c9a92; --accent:#c96442; --on-accent:#fff; --danger:#dc7560;
+  --fg:#f5f4ef; --muted:#9c9a92; --accent:#d9d7d1; --on-accent:#1a1a19; --danger:#e06060;
   --glass:rgba(26,26,25,.92); color-scheme:dark;
 }}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -34,14 +34,16 @@ html,body{margin:0;min-height:100%;overflow-x:hidden;background:var(--bg);color:
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 [hidden]{display:none!important}
-a{color:var(--accent)}
+a{color:var(--fg)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 header{position:fixed;top:0;left:0;right:0;z-index:20;background:var(--glass);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:calc(var(--top) + 6px) 8px 6px 16px;
   display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line)}
 header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
-header h1 i{width:10px;height:10px;border-radius:3px;background:var(--accent);flex:none;transform:rotate(45deg)}
+.logo{border:0;background:none;padding:2px 4px 2px 0;font:900 24px/1 var(--font);letter-spacing:-.04em;color:var(--fg);flex:none}
+.logo:active{opacity:.6}
+#hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 .icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
 .icon-btn:active{background:var(--raised)}
 .icon-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -58,7 +60,7 @@ nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;background:va
 nav button{flex:1;height:var(--nav-h);border:0;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--muted)}
 nav button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 nav button[aria-current="true"]{color:var(--fg);font-weight:600}
-nav button[aria-current="true"] svg{stroke:var(--accent)}
+nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 
 .searchbar{display:flex;gap:8px;padding:12px 16px 4px}
 .searchbar input{flex:1;min-width:0;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);outline:none}
@@ -123,7 +125,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #pInfo>.sub{font-size:12px}
 .desc{white-space:pre-wrap;color:var(--muted);font-size:12.5px;line-height:1.45;background:var(--surface);border-radius:10px;padding:10px 12px;max-height:4.6em;overflow:hidden;overflow-wrap:anywhere}
 .desc.full{max-height:none}
-.more{border:0;background:none;color:var(--accent);padding:6px 0;font-size:12.5px;font-weight:600}
+.more{border:0;background:none;color:var(--fg);padding:6px 0;font-size:12.5px;font-weight:600}
 
 .vt{font:700 18px/1.3 var(--font);margin:0;text-wrap:pretty;overflow-wrap:anywhere}
 .vmeta{min-width:0;overflow-wrap:anywhere;font-size:12.5px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
@@ -208,7 +210,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <body>
 
 <header>
-  <h1><i></i><span id="hTitle">Home</span></h1>
+  <h1><button class="logo" id="logo" aria-label="YT-, vai alle iscrizioni">YT-</button><span id="hTitle"></span></h1>
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
@@ -1117,7 +1119,8 @@ function paintSub(id){
 
 /* ---------- navigazione ---------- */
 const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni" };
-function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : TITLES[tab]; }
+const LABEL = t => t === "vHome" ? "" : TITLES[t];
+function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : LABEL(tab); }
 function rerender(){
   if (tab === "vHome") renderHome(); else if (tab === "vSubs") renderSubs();
   else if (tab === "vSearch") renderSearch();
@@ -1128,7 +1131,7 @@ function go(t){
   document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== t);
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === t));
   $("#navHome").hidden = !S.opt.showHome;
-  $("#hTitle").textContent = TITLES[t];
+  $("#hTitle").textContent = LABEL(t);
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
   if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome(); }
   if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
@@ -1243,6 +1246,7 @@ $("#csvFile").addEventListener("change", async e => {
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
+$("#logo").onclick = () => { closeSheets(); go("vSubs"); };
 $("#pClose").onclick = () => closeSheet("#player");
 $("#nClose").onclick = () => closeSheet("#notifs");
 
