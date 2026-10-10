@@ -195,6 +195,11 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   #player.open{overflow:hidden;padding:0}
   #player.open .frame{position:fixed;inset:0;z-index:100;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;max-width:none}
 }
+#ptr{position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
+  background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.3);display:grid;place-items:center;opacity:0;transform:translateY(-50px);pointer-events:none}
+#ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#ptr.go svg{animation:spin 1s linear infinite}
+#ptr.back{transition:transform .25s ease,opacity .25s ease}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}.spin svg{animation:none}}
 </style>
 </head>
@@ -207,6 +212,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
 </header>
 
+<div id="ptr" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></div>
 <main>
   <section class="view" id="vHome"></section>
   <section class="view" id="vSubs" hidden></section>
@@ -475,14 +481,16 @@ async function refresh(manual){
     const res = await pool(S.channels, 16, ch => channelUploads(ch).finally(() => progress(++done, total)));
     const firstErr = res.find(r => r?.error)?.error;
     if (firstErr && res.every(r => r?.error)) throw firstErr;
-    const lax = new Set(), all = [];
-    res.forEach(r => { if (r?.ids) { all.push(...r.ids); if (!r.strict) r.ids.forEach(id => lax.add(id)); } });
+    const lax = new Set(), all = [], failed = new Set();
+    res.forEach((r, i) => { if (r?.ids) { all.push(...r.ids); if (!r.strict) r.ids.forEach(id => lax.add(id)); } else failed.add(S.channels[i].id); });
     const vids = [];
     for (const v of await videoDetails([...new Set(all)])) {
       if (v.snippet.liveBroadcastContent === "upcoming") continue;
       if (lax.has(v.id) && looksShort(v, secs(v.contentDetails.duration))) continue;
       vids.push(toVideo(v));
     }
+    const got = new Set(vids.map(v => v.id));
+    vids.push(...S.videos.filter(v => failed.has(v.ch) && !got.has(v.id)));   // tieni i video vecchi dei canali non aggiornati
     vids.sort((a, b) => b.at.localeCompare(a.at));
     if (!S.seenNotif) S.seenNotif = vids[0] ? Date.parse(vids[0].at) : Date.now();
     S.videos = remember(vids); S.lastFetch = Date.now(); lastError = ""; save();
@@ -1235,6 +1243,35 @@ $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
 $("#pClose").onclick = () => closeSheet("#player");
 $("#nClose").onclick = () => closeSheet("#notifs");
+
+/* ---------- trascina in basso per aggiornare ---------- */
+(() => {
+  const el = $("#ptr"), LIMIT = 75;
+  let y0 = null, d = 0;
+  const sheetOpen = () => !!document.querySelector(".sheet.open,.menu");
+  const set = (px, rot) => { el.style.transform = `translateY(${px - 50}px) rotate(${rot}deg)`; el.style.opacity = Math.min(1, px / LIMIT); };
+  addEventListener("touchstart", e => {
+    if (window.scrollY > 0 || sheetOpen() || !(tab === "vHome" || tab === "vSubs") || e.touches.length > 1) { y0 = null; return; }
+    y0 = e.touches[0].clientY; d = 0; el.classList.remove("back");
+  }, { passive: true });
+  addEventListener("touchmove", e => {
+    if (y0 === null) return;
+    d = Math.max(0, (e.touches[0].clientY - y0) * 0.5);
+    if (window.scrollY > 0) d = 0;
+    set(Math.min(d, LIMIT + 25), d * 3);
+  }, { passive: true });
+  addEventListener("touchend", async () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (d >= LIMIT) {
+      el.classList.add("back"); set(LIMIT, 0); el.classList.add("go");
+      try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
+      await (tab === "vHome" ? loadHome(true) : refresh(true));
+      el.classList.remove("go");
+    }
+    el.classList.add("back"); el.style.transform = "translateY(-50px)"; el.style.opacity = 0;
+  }, { passive: true });
+})();
 
 /* ---------- avvio ---------- */
 const after = readLoginReturn();
