@@ -135,6 +135,9 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .replies{margin-top:6px}
 .replies .cmt{border-top:0;padding:6px 0}
 
+.chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 14px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:0;border-radius:999px;padding:7px 13px;background:var(--raised);font-size:13px;font-weight:500}
 .notif{display:flex;gap:12px;padding:10px 16px;width:100%;border:0;background:none;text-align:left;align-items:center}
 .notif.new{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .notif img.t{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;flex:none;background:var(--surface)}
@@ -198,7 +201,7 @@ const DEF_OPT = { hideWatched: false, perChannel: 8, showHome: true, region: "IT
 const S = Object.assign({
   key: "", clientId: "", token: "", tokenExp: 0, tokenScope: "", me: null, lastSync: 0,
   channels: [], videos: [], lastFetch: 0, watched: {}, avatars: {}, noLF: {},
-  home: [], homeFetch: 0, seenNotif: 0
+  home: [], homeFetch: 0, homeMode: "", homeTags: [], seenNotif: 0, likes: [], hist: [], blocked: {}
 }, load());
 S.opt = Object.assign({}, DEF_OPT, S.opt || {});
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
@@ -286,7 +289,12 @@ async function syncSubs(){
     const manual = S.channels.filter(c => c.manual && !subs.some(s => s.id === c.id));
     S.channels = subs.concat(manual);
     S.videos = S.videos.filter(v => S.channels.some(c => c.id === v.ch));
-    S.lastSync = Date.now(); S.lastFetch = 0; save();
+    try {
+      const lk = await apiAuth("videos", { part: "snippet", myRating: "like", maxResults: 50 });
+      S.likes = (lk.items || []).map(v => ({ cat: v.snippet.categoryId, ch: v.snippet.channelId,
+        tags: (v.snippet.tags || []).slice(0, 12).map(t => t.toLowerCase()) }));
+    } catch {}
+    S.lastSync = Date.now(); S.lastFetch = 0; S.homeFetch = 0; save();
     toast(`Iscrizioni sincronizzate: ${subs.length} canali`);
   } catch (e) { toast(e.message); }
   finally { busy = false; spin(false); }
@@ -336,7 +344,8 @@ function toVideo(v){
     at: v.snippet.publishedAt, dur: d, live: v.snippet.liveBroadcastContent === "live",
     views: +v.statistics?.viewCount || 0,
     thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "",
-    desc: (v.snippet.description || "").slice(0, 3000) };
+    desc: (v.snippet.description || "").slice(0, 3000), cat: v.snippet.categoryId || "",
+    tags: (v.snippet.tags || []).slice(0, 12).map(t => t.toLowerCase()) };
 }
 async function pool(items, size, fn){
   const out = []; let i = 0;
@@ -397,13 +406,53 @@ async function refresh(manual){
   finally { busy = false; spin(false); progress(0, 0); updateBell(); rerender(); }
 }
 
-/* Home: video di tendenza nel tuo paese (YouTube non dà la home personale tramite API) */
+/* Home "Per te": YouTube non dà i consigliati personali via API, quindi li ricostruiamo dai tuoi segnali:
+   like su YouTube (peso 3), video guardati in YTG (peso 2), video dei tuoi canali (peso basso).
+   Da qui escono le categorie preferite (tendenze per categoria, 1 unità ciascuna)
+   e le parole chiave preferite (ricerche recenti, 100 unità ciascuna). */
+const CATS = { "1":"Film e animazione","2":"Motori","10":"Musica","15":"Animali","17":"Sport","19":"Viaggi","20":"Videogiochi",
+  "22":"Persone e blog","23":"Comicità","24":"Intrattenimento","25":"Notizie","26":"Stile e consigli","27":"Istruzione","28":"Scienza e tecnologia","29":"Attivismo" };
+const STOP = new Set(["video","youtube","shorts","short","new","2024","2025","2026","official","ita","italia","italiano","the","and","di","il","la","e"]);
+function interests(){
+  const cat = {}, tag = {}, chNames = new Set(S.channels.map(c => c.title.toLowerCase()));
+  const add = (v, w) => {
+    if (!v) return;
+    if (v.cat && CATS[v.cat]) cat[v.cat] = (cat[v.cat] || 0) + w;
+    for (const t of new Set(v.tags || [])) if (t.length > 2 && t.length < 32 && !STOP.has(t) && !chNames.has(t)) tag[t] = (tag[t] || 0) + w;
+  };
+  S.likes.forEach(v => add(v, 3)); S.hist.forEach(v => add(v, 2)); S.videos.slice(0, 200).forEach(v => add(v, .25));
+  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  return { cats: top(cat).slice(0, 3), tags: top(tag).filter(t => tag[t] >= 2).slice(0, 2) };
+}
+function interleave(lists){
+  const out = [], seen = new Set(); let i = 0, more = true;
+  while (more) { more = false; for (const l of lists) if (i < l.length) { more = true; const v = l[i]; if (!seen.has(v.id)) { seen.add(v.id); out.push(v); } } i++; }
+  return out;
+}
 async function loadHome(manual){
   if (homeBusy || !S.key) return;
-  homeBusy = true; spin(true);
+  homeBusy = true; spin(true); rerender();
   try {
-    const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50 });
-    S.home = remember((j.items || []).filter(v => !looksShort(v, secs(v.contentDetails.duration))).map(toVideo));
+    const { cats, tags } = interests();
+    const keep = v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration));
+    const ok = v => !S.watched[v.id] && !S.blocked[v.ch];
+    let lists = [];
+    if (cats.length || tags.length) {
+      const since = new Date(Date.now() - 45 * 864e5).toISOString();
+      const jobs = cats.map(c => api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, videoCategoryId: c, maxResults: 25 })
+          .then(j => (j.items || []).filter(keep).map(toVideo)).catch(() => []))
+        .concat(tags.map(t => api("search", { part: "id", q: t, type: "video", maxResults: 20, publishedAfter: since, regionCode: S.opt.region, relevanceLanguage: "it" })
+          .then(j => videoDetails((j.items || []).map(i => i.id.videoId).filter(Boolean)))
+          .then(items => items.filter(keep).map(toVideo)).catch(() => [])));
+      lists = (await Promise.all(jobs)).map(l => l.filter(ok));
+      S.homeMode = "foryou"; S.homeTags = cats.map(c => CATS[c]).concat(tags);
+    }
+    if (!lists.some(l => l.length)) {
+      const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50 });
+      lists = [(j.items || []).filter(keep).map(toVideo).filter(ok)];
+      S.homeMode = "trend"; S.homeTags = [];
+    }
+    S.home = remember(interleave(lists).slice(0, 60));
     S.homeFetch = Date.now(); homeError = ""; save();
     if (manual) toast("Home aggiornata");
     ensureAvatars(S.home);
@@ -473,12 +522,16 @@ function renderHome(){
   const v = $("#vHome"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
   const list = S.home.filter(x => !S.opt.hideWatched || !S.watched[x.id]);
   if (!list.length) {
-    v.innerHTML = `<div class="empty"><h2>${homeBusy ? "Carico la Home…" : "Home vuota"}</h2>
+    v.innerHTML = `<div class="empty"><h2>${homeBusy ? "Preparo la tua Home…" : "Home vuota"}</h2>
       ${homeError ? `<p class="status err">Errore: ${esc(homeError)}</p>` : ""}
       ${homeBusy ? "" : `<div class="row-btns"><button class="btn" data-act="home">Carica la Home</button></div>`}</div>`;
     return;
   }
-  v.innerHTML = `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>` + list.map(card).join("");
+  const head = S.homeMode === "foryou"
+    ? `<div class="group">Per te</div><div class="chips">${S.homeTags.map(t => `<button class="chip" data-q="${esc(t)}">${esc(t)}</button>`).join("")}</div>`
+    : `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>
+       <div class="help" style="padding:0 16px 12px">Metti like ai video su YouTube o guardane qualcuno qui: la Home imparerà i tuoi gusti.${S.me ? "" : " Accedi con Google per usare anche i tuoi like."}</div>`;
+  v.innerHTML = head + list.map(card).join("");
 }
 
 function renderSubs(){
@@ -558,7 +611,7 @@ function renderSettings(){
       <label class="toggle"><div>Video per canale<small>Quanti video recenti caricare da ogni iscrizione</small></div>
         <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
-    <div class="help" style="margin-top:10px">Gli Shorts sono sempre esclusi. Quota gratuita: 10.000 unità al giorno. Aggiornare le iscrizioni ne usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)}, la Home 1, ogni ricerca circa 101, ogni commento inviato 50.</div>
+    <div class="help" style="margin-top:10px">Gli Shorts sono sempre esclusi. Quota gratuita: 10.000 unità al giorno. Aggiornare le iscrizioni ne usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)}, la Home circa 200 (si aggiorna da sola ogni 4 ore), ogni ricerca circa 101, ogni commento inviato 50.</div>
 
     <h2 style="margin-top:22px">Chiave API YouTube</h2>
     <div class="panel"><form class="field" id="keyForm">
@@ -576,6 +629,7 @@ function renderSettings(){
     <h2 style="margin-top:22px">Dati</h2>
     <div class="panel">
       <button class="toggle" style="width:100%;border:0;background:none;text-align:left" data-act="clearSeen">Azzera i video visti</button>
+      <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="clearTaste">Azzera i gusti della Home e i canali nascosti</button>
       <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--danger)" data-act="reset">Cancella tutto</button>
     </div>
     <div class="status">${S.lastFetch ? "Iscrizioni aggiornate " + ago(new Date(S.lastFetch).toISOString()) : ""}</div>
@@ -610,13 +664,15 @@ function closeSheets(){
 function openVideo(id){
   const x = CACHE.get(id); if (!x) return;
   $("#notifs").classList.remove("open");
-  current = x; S.watched[id] = Date.now(); save();
+  current = x; S.watched[id] = Date.now();
+  S.hist = [{ cat: x.cat, ch: x.ch, tags: x.tags || [] }].concat(S.hist.filter((_, i) => i < 149)); save();
   $("#pFrame").innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${esc(x.title)}"></iframe>`;
   $("#pExt").href = "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
   const more = S.videos.filter(v => v.ch === x.ch && v.id !== id).slice(0, 5);
   $("#pInfo").innerHTML = `<h2>${esc(x.title)}</h2>
     <div class="sub">${[x.views ? views(x.views) : "", ago(x.at), x.dur ? fmtDur(x.dur) : ""].filter(Boolean).join(" · ")}</div>
-    <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt=""><b>${esc(x.chTitle)}</b></div>
+    <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt=""><b style="flex:1;min-width:0">${esc(x.chTitle)}</b>
+      ${S.channels.some(c => c.id === x.ch) ? "" : `<button class="btn ghost" data-act="block" style="padding:7px 12px;font-size:13px">Non mi interessa</button>`}</div>
     ${x.desc ? `<div class="desc" id="pDesc">${esc(x.desc)}</div><button class="more" data-act="desc">Mostra tutto</button>` : ""}
     <div class="comments">
       <h3>Commenti</h3>
@@ -712,7 +768,7 @@ function go(t){
   $("#navHome").hidden = !S.opt.showHome;
   $("#hTitle").textContent = TITLES[t];
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
-  if (t === "vHome") { renderHome(); if (S.key && Date.now() - S.homeFetch > 30 * 60000) loadHome(); }
+  if (t === "vHome") { renderHome(); if (S.key && Date.now() - S.homeFetch > 4 * 3600000) loadHome(); }
   if (t === "vSubs") { renderSubs(); if (Date.now() - S.lastFetch > 20 * 60000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
@@ -732,11 +788,12 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies]"); if (!t) return;
+  const t = e.target.closest("[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
   if (t.dataset.tab) return go(t.dataset.tab);
   if (t.dataset.go) { closeSheets(); return go(t.dataset.go); }
   if (t.dataset.v) return openVideo(t.dataset.v);
   if (t.dataset.replies) return loadReplies(t.dataset.replies);
+  if (t.dataset.q) { go("vSearch"); $("#sIn").value = t.dataset.q; return doSearch(t.dataset.q); }
   if (t.dataset.del) {
     S.channels = S.channels.filter(c => c.id !== t.dataset.del);
     S.videos = S.videos.filter(v => v.ch !== t.dataset.del); save(); updateBell(); return renderChannels("Canale rimosso.");
@@ -748,7 +805,12 @@ document.addEventListener("click", e => {
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
   if (a === "moreComments") loadComments(false);
+  if (a === "block" && current) {
+    S.blocked[current.ch] = 1; S.home = S.home.filter(v => v.ch !== current.ch); save();
+    t.remove(); toast(`Non vedrai più ${current.chTitle} nella Home`); rerender();
+  }
   if (a === "desc") { $("#pDesc").classList.add("full"); t.remove(); }
+  if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
     if (!resetArmed) { resetArmed = true; t.textContent = "Tocca di nuovo per confermare"; setTimeout(() => { resetArmed = false; if (t.isConnected) t.textContent = "Cancella tutto"; }, 4000); return; }
@@ -818,7 +880,7 @@ if (!after && S.channels.length && Date.now() - S.lastFetch > 20 * 60000 && tab 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   if (Date.now() - S.lastFetch > 20 * 60000) refresh();
-  if (tab === "vHome" && Date.now() - S.homeFetch > 30 * 60000) loadHome();
+  if (tab === "vHome" && Date.now() - S.homeFetch > 4 * 3600000) loadHome();
 });
 </script>
 </body>
