@@ -295,13 +295,24 @@ function toast(msg){
 }
 
 /* ---------- API ---------- */
+/* Quota: 10.000 unità al giorno, azzerate a mezzanotte in California (le 9:00 in Italia) */
+const qDay = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+function spend(path, method){
+  const cost = path.startsWith("search") ? 100 : (method && method !== "GET") ? 50 : 1;
+  const d = qDay(); if (S.qDay !== d) { S.qDay = d; S.qUsed = 0; S.quotaOut = ""; }
+  S.qUsed = (S.qUsed || 0) + cost;
+}
+const quotaOut = () => S.quotaOut === qDay();
+function markQuota(e){ if (e?.reason === "quotaExceeded") { S.quotaOut = qDay(); save(); } }
+
 async function api(path, params){
   if (!S.key) throw new Error("Manca la chiave API: aggiungila in Impostazioni.");
+  spend(path, "GET");
   const r = await fetch(API + path + "?" + new URLSearchParams({ ...params, key: S.key }));
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(j.error?.message || ("Errore " + r.status));
-    e.status = r.status; e.reason = j.error?.errors?.[0]?.reason; throw e;
+    e.status = r.status; e.reason = j.error?.errors?.[0]?.reason; markQuota(e); throw e;
   }
   return j;
 }
@@ -334,6 +345,7 @@ function readLoginReturn(){
 }
 
 async function apiAuth(path, params, body){
+  spend(path, body ? "POST" : "GET");
   const r = await fetch(API + path + "?" + new URLSearchParams(params), {
     method: body ? "POST" : "GET",
     headers: { Authorization: "Bearer " + S.token, ...(body ? { "Content-Type": "application/json" } : {}) },
@@ -451,7 +463,7 @@ async function channelUploads(ch){
 }
 
 const spin = on => $("#btnRefresh").classList.toggle("spin", on);
-const errMsg = e => e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message;
+const errMsg = e => e.reason === "quotaExceeded" ? "Unità giornaliere finite: l'app torna a funzionare dopo le 9:00" : e.message;
 
 async function refresh(manual){
   if (busy) return;
@@ -495,7 +507,7 @@ function interests(){
   };
   S.likes.forEach(v => add(v, 3)); S.hist.forEach(v => add(v, 2)); S.videos.slice(0, 200).forEach(v => add(v, .25));
   const top = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(x => x[0]);
-  return { cats: top(cat).slice(0, 3), tags: top(tag).filter(t => tag[t] >= 2).slice(0, 2) };
+  return { cats: top(cat).slice(0, 4), tags: top(tag).filter(t => tag[t] >= 2).slice(0, 4) };
 }
 function interleave(lists){
   const out = [], seen = new Set(); let i = 0, more = true;
@@ -511,12 +523,9 @@ async function loadHome(manual){
     const ok = v => !S.watched[v.id] && !S.blocked[v.ch];
     let lists = [];
     if (cats.length || tags.length) {
-      const since = new Date(Date.now() - 45 * 864e5).toISOString();
       const jobs = cats.map(c => api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, videoCategoryId: c, maxResults: 25 })
           .then(j => (j.items || []).filter(keep).map(toVideo)).catch(() => []))
-        .concat(tags.map(t => api("search", { part: "id", q: t, type: "video", maxResults: 20, publishedAfter: since, regionCode: S.opt.region, relevanceLanguage: "it" })
-          .then(j => videoDetails((j.items || []).map(i => i.id.videoId).filter(Boolean)))
-          .then(items => items.filter(keep).map(toVideo)).catch(() => [])));
+        ;
       lists = (await Promise.all(jobs)).map(l => l.filter(ok));
       S.homeMode = "foryou"; S.homeTags = cats.map(c => CATS[c]).concat(tags);
     }
@@ -684,7 +693,13 @@ function renderSettings(){
       <label class="toggle"><div>Video per canale<small>Quanti video recenti caricare da ogni iscrizione</small></div>
         <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
-    <div class="help" style="margin-top:10px">Gli Shorts sono sempre esclusi. Quota gratuita: 10.000 unità al giorno. Aggiornare le iscrizioni ne usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)}, la Home circa 200 (si aggiorna da sola ogni 4 ore), ogni ricerca circa 101, ogni commento inviato 50.</div>
+    <h2 style="margin-top:22px">Unità di oggi</h2>
+    <div class="panel" style="padding:14px">
+      <div style="display:flex;justify-content:space-between;font-size:14px;font-variant-numeric:tabular-nums"><b>${(S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} usate</b><span style="color:var(--muted)">su 10.000</span></div>
+      <div style="height:8px;border-radius:4px;background:var(--raised);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100, (S.qDay === qDay() ? S.qUsed || 0 : 0) / 100)}%;background:${quotaOut() ? "var(--danger)" : "var(--accent)"}"></div></div>
+      <div class="help" style="padding:0">${quotaOut() ? "Unità finite per oggi. " : ""}Si azzerano ogni giorno alle 9:00. Conteggio stimato da questo telefono.<br>
+        Costi: Iscrizioni ~${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)} (in automatico al massimo una volta all'ora) · Home ~5 · ricerca ~101 · aprire un video ~3 · commento, Mi piace o iscrizione 50.</div>
+    </div>
 
     <h2 style="margin-top:22px">Chiave API YouTube</h2>
     <div class="panel"><form class="field" id="keyForm">
@@ -863,6 +878,7 @@ async function rate(kind){
   if (next === "like") video.likes = (video.likes || 0) + 1;
   const l = $("#vLikes"); if (l) l.textContent = video.likes ? num(video.likes) + " Mi piace" : "";
   try {
+    spend("videos/rate", "POST");
     const r = await fetch(API + "videos/rate?" + new URLSearchParams({ id: video.id, rating: next }), { method: "POST", headers: { Authorization: "Bearer " + S.token } });
     if (r.status === 401) { S.token = ""; save(); myRating = prev; paintRating(); return rate(kind); }
     if (!r.ok) throw new Error("Errore " + r.status);
@@ -1066,6 +1082,7 @@ async function toggleSub(id, title, thumb){
       const j = await apiAuth("subscriptions", { part: "id", mine: "true", forChannelId: id });
       const sid = j.items?.[0]?.id;
       if (sid) {
+        spend("subscriptions", "DELETE");
         const r = await fetch(API + "subscriptions?id=" + encodeURIComponent(sid), { method: "DELETE", headers: { Authorization: "Bearer " + S.token } });
         if (r.status === 401) { const e = new Error("Sessione scaduta"); e.relogin = true; throw e; }
         if (!r.ok && r.status !== 404) throw new Error("Errore " + r.status);
@@ -1103,8 +1120,8 @@ function go(t){
   $("#navHome").hidden = !S.opt.showHome;
   $("#hTitle").textContent = TITLES[t];
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
-  if (t === "vHome") { renderHome(); if (S.key && Date.now() - S.homeFetch > 4 * 3600000) loadHome(); }
-  if (t === "vSubs") { renderSubs(); if (Date.now() - S.lastFetch > 20 * 60000) refresh(); }
+  if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome(); }
+  if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
   if (t === "vSettings") renderSettings();
@@ -1234,11 +1251,11 @@ if (after?.do === "comment") {
 } else if (after) { go("vChannels"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell();
-if (!after && S.channels.length && Date.now() - S.lastFetch > 20 * 60000 && tab !== "vSubs") refresh();
+if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  if (Date.now() - S.lastFetch > 20 * 60000) refresh();
-  if (tab === "vHome" && Date.now() - S.homeFetch > 4 * 3600000) loadHome();
+  if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh();
+  if (tab === "vHome" && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome();
 });
 </script>
 </body>
