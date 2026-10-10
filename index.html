@@ -330,11 +330,59 @@ const DEF_OPT = { hideWatched: false, perChannel: 8, showHome: true, region: "IT
 const S = Object.assign({
   key: "", clientId: "", token: "", tokenExp: 0, tokenScope: "", me: null, lastSync: 0,
   channels: [], videos: [], lastFetch: 0, watched: {}, avatars: {}, noLF: {},
-  home: [], homeFetch: 0, homeMode: "", homeTags: [], seenNotif: 0, likes: [], hist: [], blocked: {}
+  home: [], homeFetch: 0, homeMode: "", homeTags: [], seenNotif: 0, likes: [], hist: [], blocked: {},
+  chMeta: {}, sCache: {}, relCache: {}, lastCost: null
 }, load());
 S.opt = Object.assign({}, DEF_OPT, S.opt || {});
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
-function save(){ try { localStorage.setItem(LS, JSON.stringify(S)); } catch {} }
+
+/* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
+   e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache"];
+let idb = null, bigReady = false, saveT = 0, resetting = false;
+function idbOpen(){
+  return new Promise(res => {
+    try {
+      const r = indexedDB.open("ytg", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result);
+      r.onerror = r.onblocked = () => res(null);
+    } catch { res(null); }
+  });
+}
+function idbGet(k){
+  return new Promise(res => {
+    try { const q = idb.transaction("kv").objectStore("kv").get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }
+    catch { res(undefined); }
+  });
+}
+function idbPut(obj){ try { const st = idb.transaction("kv", "readwrite").objectStore("kv"); for (const k in obj) st.put(obj[k], k); } catch {} }
+function idbClear(){
+  return new Promise(res => {
+    try { const t = idb.transaction("kv", "readwrite"); t.objectStore("kv").clear(); t.oncomplete = t.onerror = () => res(); }
+    catch { res(); }
+  });
+}
+async function loadBig(){
+  idb = await Promise.race([idbOpen(), new Promise(r => setTimeout(() => r(null), 2000))]);
+  if (idb) for (const k of BIG) { const v = await idbGet(k); if (v !== undefined && v !== null) S[k] = v; }
+  for (const k of ["chMeta", "sCache", "relCache", "avatars"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
+  bigReady = true;
+}
+function save(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 400); }
+function saveNow(){
+  clearTimeout(saveT);
+  if (resetting) return;
+  const small = {};
+  for (const k in S) if (!(idb && BIG.includes(k))) small[k] = S[k];
+  try { localStorage.setItem(LS, JSON.stringify(small)); }
+  catch {
+    try { localStorage.setItem(LS, JSON.stringify({ ...small, videos: (small.videos || []).slice(0, 600), home: [], sCache: {}, relCache: {} })); } catch {}
+  }
+  if (idb && bigReady) { const o = {}; BIG.forEach(k => o[k] = S[k]); idbPut(o); }
+}
+addEventListener("pagehide", saveNow);
+document.addEventListener("visibilitychange", () => { if (document.hidden) saveNow(); });
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -342,7 +390,6 @@ let busy = false, homeBusy = false, tab = "vHome", lastError = "", homeError = "
 let searchQ = "", searchRes = null, searchBusy = false, searchErr = "";
 const CACHE = new Map();           // tutti i video visti (iscrizioni, home, ricerca) per aprirli nel player
 const remember = list => { list.forEach(v => CACHE.set(v.id, v)); return list; };
-remember(S.videos); remember(S.home);
 
 function toast(msg){
   document.querySelectorAll(".toast").forEach(t => t.remove());
@@ -384,6 +431,7 @@ function startLogin(after){
   try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: "token",
     scope: SCOPE, include_granted_scopes: "true", state, ...(S.me ? {} : { prompt: "select_account" }) });
+  saveNow();
   location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
 
@@ -485,8 +533,8 @@ function toVideo(v){
     at: v.snippet.publishedAt, dur: d, live: v.snippet.liveBroadcastContent === "live",
     views: +v.statistics?.viewCount || 0, likes: +v.statistics?.likeCount || 0, comments: +v.statistics?.commentCount || 0,
     thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "",
-    desc: (v.snippet.description || "").slice(0, 3000), cat: v.snippet.categoryId || "",
-    tags: (v.snippet.tags || []).slice(0, 12).map(t => t.toLowerCase()) };
+    desc: (v.snippet.description || "").slice(0, 200), cat: v.snippet.categoryId || "",
+    tags: (v.snippet.tags || []).slice(0, 8).map(t => t.toLowerCase()) };
 }
 async function pool(items, size, fn){
   const out = []; let i = 0;
@@ -521,32 +569,112 @@ async function channelUploads(ch){
 const spin = on => $("#btnRefresh").classList.toggle("spin", on);
 const errMsg = e => e.reason === "quotaExceeded" ? "Unità giornaliere finite: l'app torna a funzionare dopo le 9:00" : e.message;
 
+const usedToday = () => S.qDay === qDay() ? S.qUsed || 0 : 0;
+
+/* Aggiornamento delle iscrizioni, pensato per consumare poche unità:
+   1) channels.list legge quanti video ha ogni canale, 50 canali per unità (460 canali = 10 unità);
+   2) si scaricano gli ultimi video solo dei canali il cui numero è cambiato (1 unità ciascuno),
+      più un piccolo controllo a rotazione di 4 canali, nel caso il contatore di YouTube sia in ritardo;
+   3) si chiedono i dettagli solo dei video mai visti (1 unità ogni 50 video).
+   Il primo aggiornamento scarica tutti i canali una volta sola. */
 async function refresh(manual){
   if (busy) return;
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
   if (!S.channels.length) { if (manual) toast("Nessun canale: accedi o aggiungili dalla scheda Canali"); return; }
   busy = true; spin(true);
-  const total = S.channels.length; let done = 0; progress(0, total);
+  const u0 = usedToday(), now = Date.now(), meta = S.chMeta;
   try {
-    const res = await pool(S.channels, 16, ch => channelUploads(ch).finally(() => progress(++done, total)));
-    const firstErr = res.find(r => r?.error)?.error;
-    if (firstErr && res.every(r => r?.error)) throw firstErr;
-    const lax = new Set(), all = [], failed = new Set();
-    res.forEach((r, i) => { if (r?.ids) { all.push(...r.ids); if (!r.strict) r.ids.forEach(id => lax.add(id)); } else failed.add(S.channels[i].id); });
-    const vids = [];
-    for (const v of await videoDetails([...new Set(all)])) {
-      if (v.snippet.liveBroadcastContent === "upcoming") continue;
-      if (lax.has(v.id) && looksShort(v, secs(v.contentDetails.duration))) continue;
-      vids.push(toVideo(v));
+    // 1) quanti video ha ogni canale
+    $("#hTitle").textContent = tab === "vSubs" ? "Controllo i canali…" : LABEL(tab);
+    const ids = S.channels.map(c => c.id), batches = [], counts = {};
+    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+    const pages = await pool(batches, 4, b => api("channels", { part: "statistics", id: b.join(","), maxResults: 50 }));
+    const firstErr = pages.find(p => p?.error)?.error;
+    if (firstErr && pages.every(p => p?.error)) throw firstErr;
+    pages.forEach(p => (p?.items || []).forEach(c => counts[c.id] = +c.statistics?.videoCount || 0));
+
+    // 2) quali canali scaricare
+    const newest = {};
+    for (const v of S.videos) if (!newest[v.ch] || v.at > newest[v.ch]) newest[v.ch] = v.at;
+    const changed = S.channels.filter(c => {
+      const m = meta[c.id];
+      if (!m) return true;
+      if (c.id in counts && counts[c.id] !== m.n) return true;
+      return m.up && now - m.at > 2 * 3600000;                 // c'era una première in arrivo
+    });
+    const inChanged = new Set(changed.map(c => c.id));
+    const active = c => newest[c.id] && now - Date.parse(newest[c.id]) < 14 * 864e5;
+    const sweep = S.channels.filter(c => meta[c.id] && !inChanged.has(c.id) && now - meta[c.id].at > (active(c) ? 3 : 48) * 3600000)
+      .sort((a, b) => (active(b) - active(a)) || meta[a.id].at - meta[b.id].at).slice(0, 4);
+    const todo = changed.concat(sweep);
+    let done = 0; progress(0, todo.length);
+    const res = await pool(todo, 12, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
+    if (todo.length && res.every(r => r?.error)) throw res[0].error;
+
+    // 3) dettagli solo dei video nuovi (e delle dirette, per sapere se sono finite)
+    const known = new Map(S.videos.map(v => [v.id, v]));
+    const want = new Set(S.videos.filter(v => v.live).map(v => v.id)), lax = new Set();
+    res.forEach((r, i) => {
+      if (!r?.ids) return;
+      const prev = new Set(meta[todo[i].id]?.ids || []);
+      r.ids.forEach(id => { if (!known.has(id) && !prev.has(id)) want.add(id); if (!r.strict) lax.add(id); });
+    });
+    const det = want.size ? await videoDetails([...want]) : [];
+    const fresh = new Map(), skipped = new Set(), upcoming = new Set();
+    for (const v of det) {
+      if (v.snippet.liveBroadcastContent === "upcoming") { upcoming.add(v.id); continue; }
+      if (lax.has(v.id) && looksShort(v, secs(v.contentDetails.duration))) { skipped.add(v.id); continue; }
+      fresh.set(v.id, toVideo(v));
     }
-    const got = new Set(vids.map(v => v.id));
-    vids.push(...S.videos.filter(v => failed.has(v.ch) && !got.has(v.id)));   // tieni i video vecchi dei canali non aggiornati
-    vids.sort((a, b) => b.at.localeCompare(a.at));
-    if (!S.seenNotif) S.seenNotif = vids[0] ? Date.parse(vids[0].at) : Date.now();
-    S.videos = remember(vids); S.lastFetch = Date.now(); lastError = ""; save();
-    if (firstErr) toast("Alcuni canali non si sono aggiornati"); else if (manual) toast("Iscrizioni aggiornate");
+    res.forEach((r, i) => {
+      if (!r?.ids) return;
+      const id = todo[i].id, prev = new Set(meta[id]?.ids || []);
+      meta[id] = { n: id in counts ? counts[id] : (meta[id]?.n ?? -1), at: now,
+        ids: r.ids.filter(x => known.has(x) || fresh.has(x) || skipped.has(x) || prev.has(x)),
+        up: r.ids.some(x => upcoming.has(x)) ? 1 : 0 };
+    });
+
+    // unisci, tieni al massimo "Video per canale" video per iscrizione
+    for (const [id, v] of fresh) known.set(id, v);
+    const subsSet = new Set(ids), per = {}, keep = [];
+    for (const v of [...known.values()].sort((a, b) => b.at.localeCompare(a.at))) {
+      if (!subsSet.has(v.ch)) continue;
+      per[v.ch] = (per[v.ch] || 0) + 1;
+      if (per[v.ch] <= Math.max(5, S.opt.perChannel)) keep.push(v);
+    }
+    if (!S.seenNotif) S.seenNotif = keep[0] ? Date.parse(keep[0].at) : now;
+    S.videos = remember(keep.slice(0, 4000)); S.lastFetch = now; lastError = "";
+    S.lastCost = usedToday() - u0; save();
+    if (firstErr || res.some(r => r?.error)) toast("Alcuni canali non si sono aggiornati");
+    else if (manual) toast(`Iscrizioni aggiornate · ${S.lastCost} unità`);
   } catch (e) { lastError = errMsg(e); toast(lastError); }
   finally { busy = false; spin(false); progress(0, 0); updateBell(); rerender(); }
+}
+
+/* Video popolari per categoria: servono sia alla Home sia ai "Video simili".
+   Restano in memoria 3 ore, così aprire video o tornare in Home non costa nulla. */
+async function catChart(c, force){
+  const key = S.opt.region + ":" + (c || "all"), rc = S.relCache;
+  if (!force && rc[key] && Date.now() - rc[key].at < 3 * 3600000) return remember(rc[key].list);
+  const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50, ...(c ? { videoCategoryId: c } : {}) });
+  const list = remember((j.items || []).filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo));
+  rc[key] = { at: Date.now(), list };
+  for (const k of Object.keys(rc)) if (Date.now() - rc[k].at > 24 * 3600000) delete rc[k];
+  save(); return list;
+}
+
+/* Ricerca su YouTube: 100 unità, fisse per Google. La stessa ricerca ripetuta entro 24 ore è gratis. */
+async function searchVideos(q, max){
+  const key = S.opt.region + ":" + q.toLowerCase().trim(), sc = S.sCache, hit = sc[key];
+  if (hit && Date.now() - hit.at < 24 * 3600000) return { list: remember(hit.list), cached: true };
+  const j = await api("search", { part: "id", q, type: "video", maxResults: max, regionCode: S.opt.region, relevanceLanguage: "it", safeSearch: "none" });
+  const ids = (j.items || []).map(i => i.id.videoId).filter(Boolean);
+  const det = ids.length ? await videoDetails(ids) : [], order = new Map(ids.map((id, i) => [id, i]));
+  const list = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration)))
+    .sort((a, b) => order.get(a.id) - order.get(b.id)).map(toVideo));
+  sc[key] = { at: Date.now(), list };
+  Object.keys(sc).sort((a, b) => sc[b].at - sc[a].at).slice(25).forEach(k => delete sc[k]);
+  save(); return { list, cached: false };
 }
 
 /* Home "Per te": YouTube non dà i consigliati personali via API, quindi li ricostruiamo dai tuoi segnali:
@@ -577,19 +705,15 @@ async function loadHome(manual){
   homeBusy = true; spin(true); rerender();
   try {
     const { cats, tags } = interests();
-    const keep = v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration));
     const ok = v => !S.watched[v.id] && !S.blocked[v.ch];
     let lists = [];
     if (cats.length || tags.length) {
-      const jobs = cats.map(c => api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, videoCategoryId: c, maxResults: 25 })
-          .then(j => (j.items || []).filter(keep).map(toVideo)).catch(() => []))
-        ;
+      const jobs = cats.map(c => catChart(c, manual).catch(() => []));
       lists = (await Promise.all(jobs)).map(l => l.filter(ok));
       S.homeMode = "foryou"; S.homeTags = cats.map(c => CATS[c]).concat(tags);
     }
     if (!lists.some(l => l.length)) {
-      const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50 });
-      lists = [(j.items || []).filter(keep).map(toVideo).filter(ok)];
+      lists = [(await catChart("", manual)).filter(ok)];
       S.homeMode = "trend"; S.homeTags = [];
     }
     S.home = remember(interleave(lists).slice(0, 60));
@@ -606,12 +730,9 @@ async function doSearch(q){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
   searchBusy = true; searchErr = ""; searchRes = null; renderSearch();
   try {
-    const j = await api("search", { part: "id", q: searchQ, type: "video", maxResults: 30, regionCode: S.opt.region, relevanceLanguage: "it", safeSearch: "none" });
-    const ids = (j.items || []).map(i => i.id.videoId).filter(Boolean);
-    const det = await videoDetails(ids);
-    const order = new Map(ids.map((id, i) => [id, i]));
-    searchRes = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration)))
-      .sort((a, b) => order.get(a.id) - order.get(b.id)).map(toVideo));
+    const r = await searchVideos(searchQ, 30);
+    searchRes = r.list;
+    if (r.cached) toast("Ricerca già fatta oggi: 0 unità");
     ensureAvatars(searchRes);
   } catch (e) { searchErr = errMsg(e); }
   finally { searchBusy = false; renderSearch(); }
@@ -709,7 +830,7 @@ function renderSearch(){
   else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
   else if (searchRes && !searchRes.length) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
   else if (searchRes) r.innerHTML = `<div class="group">Risultati per “${esc(searchQ)}”</div>` + searchRes.map(card).join("");
-  else r.innerHTML = `<div class="empty"><p>Cerca tra tutti i video di YouTube. Gli Shorts vengono esclusi.</p></div>`;
+  else r.innerHTML = `<div class="empty"><p>Cerca tra tutti i video di YouTube. Gli Shorts vengono esclusi.<br>Ogni ricerca nuova usa 100 unità; ripeterla entro 24 ore è gratis.</p></div>`;
 }
 
 function renderChannels(status, isErr){
@@ -748,7 +869,7 @@ function renderSettings(){
       <label class="toggle"><div>Paese della Home e della ricerca</div>
         <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${k}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
-      <label class="toggle"><div>Video per canale<small>Quanti video recenti caricare da ogni iscrizione</small></div>
+      <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
         <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
     <h2 style="margin-top:22px">Unità di oggi</h2>
@@ -756,7 +877,8 @@ function renderSettings(){
       <div style="display:flex;justify-content:space-between;font-size:14px;font-variant-numeric:tabular-nums"><b>${(S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} usate</b><span style="color:var(--muted)">su 10.000</span></div>
       <div style="height:8px;border-radius:4px;background:var(--raised);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100, (S.qDay === qDay() ? S.qUsed || 0 : 0) / 100)}%;background:${quotaOut() ? "var(--danger)" : "var(--accent)"}"></div></div>
       <div class="help" style="padding:0">${quotaOut() ? "Unità finite per oggi. " : ""}Si azzerano ogni giorno alle 9:00. Conteggio stimato da questo telefono.<br>
-        Costi: Iscrizioni ~${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)} (in automatico al massimo una volta all'ora) · Home ~5 · ricerca ~101 · aprire un video ~3 · commento, Mi piace o iscrizione 50.</div>
+        ${S.lastCost != null ? `Ultimo aggiornamento delle iscrizioni: <b>${S.lastCost} unità</b>.<br>` : ""}
+        Costi indicativi: Iscrizioni ${Math.ceil(S.channels.length / 50) + 2}–${Math.ceil(S.channels.length / 50) + 20} (scarica solo i canali con video nuovi; il primo aggiornamento scarica tutto una volta) · Home 0–6 · aprire un video 2–4 · pagina di un canale 3 · ricerca 100, gratis se ripetuta entro 24 ore · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
     </div>
 
     <h2 style="margin-top:22px">Chiave API YouTube</h2>
@@ -973,7 +1095,7 @@ function renderWatch(){
       <div class="pv" id="cPrev"><div class="sub">Carico…</div></div>
     </button>
     <div class="group">Video simili</div><div id="rel"></div>
-    <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili</button></div>`;
+    <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili · 100 unità</button></div>`;
   renderRelated(); loadRelated(x);
   paintRating();
 }
@@ -989,7 +1111,6 @@ function words(v){
   const t = (v.title || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/);
   return new Set(t.filter(w => w.length > 2 && !STOPW.has(w) && !/^\d+$/.test(w)).concat((v.tags || []).map(s => s.toLowerCase())));
 }
-const relCache = {};          // categoria -> { at, list }
 let relExtra = [];            // risultati della ricerca "simili"
 function similar(x){
   const kw = words(x), seen = new Set([x.id]), out = [];
@@ -1012,13 +1133,7 @@ function renderRelated(){
 async function loadRelated(x){
   relExtra = [];
   const c = x.cat; if (!c || !S.key || quotaOut()) return;
-  if (!relCache[c] || Date.now() - relCache[c].at > 3 * 3600000) {
-    try {
-      const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, videoCategoryId: c, maxResults: 50 });
-      relCache[c] = { at: Date.now(), list: remember((j.items || []).filter(v => !looksShort(v, secs(v.contentDetails.duration))).map(toVideo)) };
-      ensureAvatars(relCache[c].list);
-    } catch { relCache[c] = { at: Date.now(), list: [] }; }
-  }
+  try { ensureAvatars(await catChart(c)); } catch {}
   if (current?.id === x.id) renderRelated();
 }
 async function searchRelated(){
@@ -1026,13 +1141,11 @@ async function searchRelated(){
   const kw = [...words(x)].filter(k => !k.includes(" ")).slice(0, 5).join(" ") || x.title;
   btn.disabled = true; btn.textContent = "Cerco…";
   try {
-    const j = await api("search", { part: "id", q: kw, type: "video", maxResults: 25, regionCode: S.opt.region, relevanceLanguage: "it" });
-    const det = await videoDetails((j.items || []).map(i => i.id.videoId).filter(Boolean));
+    const r = await searchVideos(kw, 25);
     if (current?.id !== x.id) return;
-    relExtra = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo))
-      .filter(v => v.ch !== x.ch);
+    relExtra = r.list.filter(v => v.ch !== x.ch);
     ensureAvatars(relExtra); renderRelated(); btn.remove();
-  } catch (e) { btn.disabled = false; btn.textContent = "Cerca altri video simili"; toast(errMsg(e)); }
+  } catch (e) { btn.disabled = false; btn.textContent = "Cerca altri video simili · 100 unità"; toast(errMsg(e)); }
 }
 
 function paintRating(){
@@ -1042,9 +1155,13 @@ function paintRating(){
 
 async function refreshStats(id){
   try {
-    const j = await api("videos", { part: "statistics", id });
-    const st = j.items?.[0]?.statistics; if (!st || current?.id !== id) return;
+    const j = await api("videos", { part: "snippet,statistics", id });
+    const it = j.items?.[0], st = it?.statistics; if (!st || current?.id !== id) return;
     Object.assign(current, { likes: +st.likeCount || 0, comments: +st.commentCount || 0, views: +st.viewCount || current.views });
+    const full = it.snippet?.description || "";
+    const d = $("#vDesc .d"); if (d) d.textContent = full || "Nessuna descrizione.";
+    const tags = (it.snippet?.tags || []).slice(0, 15).map(t => t.toLowerCase());
+    if (tags.length > (current.tags || []).length) { current.tags = tags; renderRelated(); }
     const l = $("#vLikes"); if (l) l.textContent = current.likes ? num(current.likes) + " Mi piace" : "";
     const c = $("#cCount"); if (c) c.textContent = current.comments ? num(current.comments) : "";
   } catch {}
@@ -1371,7 +1488,8 @@ document.addEventListener("click", e => {
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
     if (!resetArmed) { resetArmed = true; t.textContent = "Tocca di nuovo per confermare"; setTimeout(() => { resetArmed = false; if (t.isConnected) t.textContent = "Cancella tutto"; }, 4000); return; }
-    try { localStorage.removeItem(LS); } catch {} location.reload();
+    resetting = true; try { localStorage.removeItem(LS); } catch {}
+    (idb ? idbClear() : Promise.resolve()).then(() => location.reload());
   }
 });
 
@@ -1404,7 +1522,7 @@ document.addEventListener("change", e => {
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
   if (id === "o_home") { S.opt.showHome = e.target.checked; save(); $("#navHome").hidden = !S.opt.showHome; }
   if (id === "o_region") { S.opt.region = e.target.value; S.homeFetch = 0; save(); }
-  if (id === "o_n") { S.opt.perChannel = +e.target.value; S.lastFetch = 0; save(); renderSettings(); }
+  if (id === "o_n") { S.opt.perChannel = +e.target.value; save(); renderSettings(); }
 });
 document.addEventListener("input", e => {
   if (e.target.id === "cIn") { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }
@@ -1457,7 +1575,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010230933";
+const BUILD = "20261010232028";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1473,6 +1591,9 @@ checkUpdate();
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 
 /* ---------- avvio ---------- */
+(async () => {
+await loadBig();
+remember(S.videos); remember(S.home);
 const after = readLoginReturn();
 if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
@@ -1493,6 +1614,8 @@ document.addEventListener("visibilitychange", () => {
   if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh();
   if (tab === "vHome" && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome();
 });
+saveNow();
+})();
 </script>
 </body>
 </html>
