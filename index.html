@@ -423,7 +423,7 @@ async function ensureAvatars(list){
   try {
     (await channelInfo(miss.slice(0, 150))).forEach(c => S.avatars[c.id] = c.thumb);
     const keys = Object.keys(S.avatars); if (keys.length > 600) keys.slice(0, keys.length - 600).forEach(k => delete S.avatars[k]);
-    save(); rerender();
+    save(); rerender(); if ($("#player").classList.contains("open")) renderRelated();
   } catch {}
 }
 
@@ -836,8 +836,6 @@ function openVideo(id){
 
 function renderWatch(){
   const x = current;
-  const pool2 = [...S.videos.filter(v => v.ch === x.ch), ...S.home, ...S.videos].filter(v => v.id !== x.id);
-  const seenIds = new Set(), related = pool2.filter(v => !seenIds.has(v.id) && seenIds.add(v.id)).slice(0, 12);
   $("#pInfo").innerHTML = `
     <h2 class="vt">${esc(x.title)}</h2>
     <div class="vmeta"><b data-ch="${x.ch}">${esc(x.chTitle)}</b>
@@ -859,8 +857,67 @@ function renderWatch(){
       <div class="h">Commenti<span id="cCount">${x.comments ? num(x.comments) : ""}</span></div>
       <div class="pv" id="cPrev"><div class="sub">Carico…</div></div>
     </button>
-    ${related.length ? `<div class="group">Altri video</div>` + related.map(card).join("") : ""}`;
+    <div class="group">Video simili</div><div id="rel"></div>
+    <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili</button></div>`;
+  renderRelated(); loadRelated(x);
   paintRating();
+}
+
+/* ---------- video simili ----------
+   L'API di YouTube non fornisce più i "video correlati". Li ricostruiamo per argomento:
+   1) tutti i video già noti all'app (Home, iscrizioni, ricerche) ordinati per somiglianza con quello aperto;
+   2) i video popolari della stessa categoria (1 unità, ricordati per 3 ore);
+   3) su richiesta, una ricerca con le parole chiave del video (100 unità).
+   I video dello stesso canale sono esclusi. */
+const STOPW = new Set("il lo la i gli le un una uno di da del della dei delle in con su per tra fra e o ma che non come cosa perché quando questo questa sono è ho ha the a an of to and or in on for with is are my your how what why vs ft feat official video parte part ep episodio".split(" "));
+function words(v){
+  const t = (v.title || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/);
+  return new Set(t.filter(w => w.length > 2 && !STOPW.has(w) && !/^\d+$/.test(w)).concat((v.tags || []).map(s => s.toLowerCase())));
+}
+const relCache = {};          // categoria -> { at, list }
+let relExtra = [];            // risultati della ricerca "simili"
+function similar(x){
+  const kw = words(x), seen = new Set([x.id]), out = [];
+  for (const v of CACHE.values()) {
+    if (seen.has(v.id) || v.ch === x.ch || !v.thumb) continue; seen.add(v.id);
+    const w = words(v); let s = 0;
+    for (const k of w) if (kw.has(k)) s += k.includes(" ") ? 4 : 3;
+    if (v.cat && v.cat === x.cat) s += 1;
+    if (S.watched[v.id]) s -= 2;
+    if (s > 0) out.push([s, v]);
+  }
+  return out.sort((a, b) => b[0] - a[0] || b[1].at.localeCompare(a[1].at)).map(p => p[1]);
+}
+function renderRelated(){
+  const x = current, box = $("#rel"); if (!x || !box) return;
+  const ids = new Set(), list = [];
+  for (const v of [...relExtra, ...similar(x)]) if (!ids.has(v.id) && v.ch !== x.ch && v.id !== x.id) { ids.add(v.id); list.push(v); }
+  box.innerHTML = list.length ? list.slice(0, 20).map(card).join("") : `<div class="status">Cerco video sullo stesso argomento…</div>`;
+}
+async function loadRelated(x){
+  relExtra = [];
+  const c = x.cat; if (!c || !S.key || quotaOut()) return;
+  if (!relCache[c] || Date.now() - relCache[c].at > 3 * 3600000) {
+    try {
+      const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, videoCategoryId: c, maxResults: 50 });
+      relCache[c] = { at: Date.now(), list: remember((j.items || []).filter(v => !looksShort(v, secs(v.contentDetails.duration))).map(toVideo)) };
+      ensureAvatars(relCache[c].list);
+    } catch { relCache[c] = { at: Date.now(), list: [] }; }
+  }
+  if (current?.id === x.id) renderRelated();
+}
+async function searchRelated(){
+  const x = current, btn = $("#relMore"); if (!x) return;
+  const kw = [...words(x)].filter(k => !k.includes(" ")).slice(0, 5).join(" ") || x.title;
+  btn.disabled = true; btn.textContent = "Cerco…";
+  try {
+    const j = await api("search", { part: "id", q: kw, type: "video", maxResults: 25, regionCode: S.opt.region, relevanceLanguage: "it" });
+    const det = await videoDetails((j.items || []).map(i => i.id.videoId).filter(Boolean));
+    if (current?.id !== x.id) return;
+    relExtra = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo))
+      .filter(v => v.ch !== x.ch);
+    ensureAvatars(relExtra); renderRelated(); btn.remove();
+  } catch (e) { btn.disabled = false; btn.textContent = "Cerca altri video simili"; toast(errMsg(e)); }
 }
 
 function paintRating(){
@@ -1185,6 +1242,7 @@ document.addEventListener("click", e => {
   if (a === "closeMenu") closeMenu();
   if (a === "copyLink") { closeMenu(); navigator.clipboard?.writeText("https://youtu.be/" + current.id).then(() => toast("Link copiato"), () => toast("https://youtu.be/" + current.id)); }
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
+  if (a === "relSearch") searchRelated();
   if (a === "openComments") { $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : ""); openSheet("#cmts"); }
   if (a === "unmute") { try { yp.unMute(); yp.setVolume(100); yp.playVideo(); } catch {} t.remove(); }
   if (a === "block" && current) {
