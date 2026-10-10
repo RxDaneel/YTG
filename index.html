@@ -192,6 +192,18 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .row .title{font-size:13.5px}
 .row .sub{font-size:11.5px}
 [data-ch]{cursor:pointer}
+.mehead{display:flex;align-items:center;gap:14px;padding:16px}
+.mehead img{width:64px;height:64px;border-radius:50%;object-fit:cover;background:var(--raised);flex:none}
+.mehead h2{margin:0;font:700 20px/1.2 var(--font);overflow-wrap:anywhere}
+.shead{display:flex;align-items:baseline;justify-content:space-between;padding:18px 16px 8px}
+.shead h3{margin:0;font:700 17px var(--font)}
+.shead .sub{font-size:12px}
+.hrow{display:flex;gap:10px;overflow-x:auto;padding:0 16px 4px;scrollbar-width:none;overscroll-behavior-x:contain}
+.hrow::-webkit-scrollbar{display:none}
+.hcard{flex:none;width:44%;max-width:220px;border:0;background:none;text-align:left;padding:0}
+.hcard .thumb{border-radius:8px}
+.hcard .title{font-size:13px;margin-top:6px}
+.hcard .sub{font-size:11.5px}
 .notif{display:flex;gap:12px;padding:10px 16px;width:100%;border:0;background:none;text-align:left;align-items:center}
 .notif.new{background:color-mix(in srgb,var(--accent) 10%,transparent)}
 .notif img.t{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;flex:none;background:var(--surface)}
@@ -256,11 +268,13 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <section class="view" id="vSearch" hidden></section>
   <section class="view" id="vChannels" hidden></section>
   <section class="view" id="vSettings" hidden></section>
+  <section class="view" id="vMe" hidden></section>
 </main>
 
 <nav id="nav">
   <button data-tab="vHome" id="navHome"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button data-tab="vSubs"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M7 3.5h10M5 5.2h14"/><path d="m10.5 11 4 2.5-4 2.5z"/></svg>Iscrizioni</button>
+  <button data-tab="vMe"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4 20.5c1.2-4 4.3-6 8-6s6.8 2 8 6"/></svg>Tu</button>
 </nav>
 
 <div class="sheet" id="player" aria-hidden="true">
@@ -340,7 +354,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catc
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -1455,13 +1469,131 @@ function paintSub(id){
   const b = $("#vSub"); if (b && current?.ch === id) { b.textContent = on ? "Iscritto" : "Iscriviti"; b.classList.toggle("on", on); }
 }
 
+/* ---------- scheda "Tu": profilo, playlist, Mi piace, i tuoi video, cronologia di YTG ----------
+   Serve l'accesso con Google. Costa circa 5 unità e i dati restano salvati un'ora.
+   YouTube non dà alle app esterne né la cronologia né "Guarda più tardi":
+   la cronologia mostrata è quella dei video aperti in YTG. */
+const ME = { busy: false, err: "", pl: null };
+async function authVideos(ids){
+  const out = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const j = await apiAuth("videos", { part: "snippet,contentDetails,statistics", id: ids.slice(i, i + 50).join(",") });
+    out.push(...(j.items || []));
+  }
+  return out;
+}
+const notShort = v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails?.duration));
+async function loadMe(manual){
+  if (ME.busy) return;
+  if (!tokenOk()) { if (manual) startLogin({ do: "me" }); return; }
+  ME.busy = true; ME.err = ""; spin(true); renderMe();
+  try {
+    const [ch, pls, liked] = await Promise.all([
+      apiAuth("channels", { part: "snippet,contentDetails,statistics", mine: "true" }),
+      apiAuth("playlists", { part: "snippet,contentDetails,status", mine: "true", maxResults: 50 }),
+      apiAuth("videos", { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50 })
+    ]);
+    const c = ch.items?.[0];
+    let uploads = [];
+    const upId = c?.contentDetails?.relatedPlaylists?.uploads;
+    if (upId && +c.statistics?.videoCount) {
+      const j = await apiAuth("playlistItems", { part: "contentDetails", playlistId: upId, maxResults: 30 });
+      const ids = (j.items || []).map(i => i.contentDetails.videoId);
+      if (ids.length) uploads = (await authVideos(ids)).map(toVideo).sort((a, b) => b.at.localeCompare(a.at));
+    }
+    if (c) S.me = { title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url || "" };
+    S.meData = {
+      at: Date.now(),
+      chan: c ? { id: c.id, title: c.snippet.title, handle: c.snippet.customUrl || "", thumb: c.snippet.thumbnails?.medium?.url || c.snippet.thumbnails?.default?.url || "",
+        subs: c.statistics?.hiddenSubscriberCount ? 0 : +c.statistics?.subscriberCount || 0, n: +c.statistics?.videoCount || 0 } : null,
+      playlists: (pls.items || []).map(p => ({ id: p.id, title: p.snippet.title, n: p.contentDetails.itemCount,
+        thumb: (p.snippet.thumbnails?.medium || p.snippet.thumbnails?.default || {}).url || "", priv: p.status?.privacyStatus || "" })),
+      liked: (liked.items || []).filter(notShort).map(toVideo),
+      uploads
+    };
+    remember(S.meData.liked); remember(S.meData.uploads); save();
+    if (manual) toast("Profilo aggiornato");
+  } catch (e) {
+    ME.err = e.relogin ? "Accedi di nuovo per vedere il tuo profilo." : errMsg(e);
+  } finally { ME.busy = false; spin(false); renderMe(); }
+}
+
+function hcard(x){
+  return `<button class="hcard" data-v="${x.id}"><div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+    ${x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
+    <div class="title">${esc(x.title)}</div><div class="sub">${esc(x.chTitle)}</div></button>`;
+}
+function myHistory(){
+  return Object.entries(S.watched).sort((a, b) => b[1] - a[1]).map(([id]) => CACHE.get(id)).filter(Boolean).slice(0, 30);
+}
+
+function renderMe(){
+  const v = $("#vMe"); if (!v) return;
+  if (ME.pl) return renderMyPlaylist();
+  const d = S.meData, hist = myHistory();
+  if (!S.clientId) {
+    v.innerHTML = `<div class="empty"><h2>Il tuo profilo</h2><p>Per vedere playlist e video del tuo account configura prima l'accesso con Google nelle impostazioni.</p>
+      <div class="row-btns"><button class="btn" data-go="vSettings">Apri impostazioni</button></div></div>`;
+    return;
+  }
+  const head = d?.chan
+    ? `<div class="mehead"><img src="${esc(d.chan.thumb)}" alt=""><div style="min-width:0"><h2>${esc(d.chan.title)}</h2>
+        <div class="sub">${[d.chan.handle, d.chan.subs ? subs(d.chan.subs) : "", d.chan.n ? d.chan.n + " video" : ""].filter(Boolean).map(esc).join(" · ")}</div>
+        ${d.chan.id ? `<button class="more" data-ch="${d.chan.id}">Vai al tuo canale ›</button>` : ""}</div></div>`
+    : `<div class="mehead"><div style="min-width:0"><h2>${esc(S.me?.title || "Il tuo profilo")}</h2></div></div>`;
+  const needLogin = !tokenOk() && !d;
+  v.innerHTML = head + `
+    ${ME.err ? `<div class="status err" style="padding:0 16px">${esc(ME.err)}</div>` : ""}
+    ${needLogin || ME.err.startsWith("Accedi") ? `<div style="padding:4px 16px 8px"><button class="btn" data-act="meLogin">Accedi con Google</button></div>` : ""}
+    ${ME.busy && !d ? `<div class="status" style="padding:8px 16px">Carico il tuo profilo…</div>` : ""}
+
+    ${hist.length ? `<div class="shead"><h3>Cronologia</h3><span class="sub">video aperti in YTG</span></div>
+      <div class="hrow">${hist.map(hcard).join("")}</div>` : ""}
+
+    ${d ? `<div class="shead"><h3>Playlist</h3><span class="sub">${d.playlists.length}</span></div>
+      <button class="row" data-act="meLiked"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
+        <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg></div>
+        <div style="min-width:0"><div class="title">Video piaciuti</div><div class="sub">${d.liked.length} video</div></div></button>
+      ${d.playlists.map(p => `<button class="row" data-mypl="${p.id}"><div class="thumb"><img loading="lazy" src="${esc(p.thumb)}" alt=""><span class="dur">${p.n} video</span></div>
+        <div style="min-width:0"><div class="title">${esc(p.title)}</div><div class="sub">Playlist</div></div></button>`).join("")
+        || `<div class="status" style="padding:4px 16px">Non hai playlist.</div>`}
+
+      <div class="shead"><h3>I tuoi video</h3><span class="sub">${d.uploads.length || ""}</span></div>
+      ${d.uploads.length ? d.uploads.map(rowHTML).join("") : `<div class="status" style="padding:4px 16px 16px">Non hai ancora caricato video.</div>`}
+      <div class="status" style="padding:12px 16px 20px">Aggiornato ${ago(new Date(d.at).toISOString())}. Trascina in basso o tocca ↻ per aggiornare.</div>` : ""}`;
+}
+
+async function openMyPlaylist(id){
+  const d = S.meData;
+  if (id === "liked") { ME.pl = { id, title: "Video piaciuti", items: d.liked }; return renderMe(); }
+  const p = d.playlists.find(x => x.id === id);
+  ME.pl = { id, title: p?.title || "Playlist", items: null }; renderMe(); window.scrollTo(0, 0);
+  try {
+    if (!tokenOk()) throw Object.assign(new Error("Accedi di nuovo per aprire la playlist."), { relogin: true });
+    const j = await apiAuth("playlistItems", { part: "contentDetails", playlistId: id, maxResults: 50 });
+    const ids = (j.items || []).map(i => i.contentDetails.videoId);
+    const det = ids.length ? await authVideos(ids) : [], order = new Map(ids.map((x, i) => [x, i]));
+    if (ME.pl?.id !== id) return;
+    ME.pl.items = remember(det.map(toVideo).sort((a, b) => order.get(a.id) - order.get(b.id)));
+  } catch (e) { if (ME.pl?.id === id) ME.pl.err = e.relogin ? e.message : errMsg(e); }
+  renderMe();
+}
+function renderMyPlaylist(){
+  const v = $("#vMe"), pl = ME.pl;
+  v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
+      <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">${esc(pl.title)}</h2></div>
+    ${pl.err ? `<div class="status err" style="padding:8px 16px">${esc(pl.err)}</div>` : !pl.items ? `<div class="status" style="padding:8px 16px">Carico…</div>`
+      : pl.items.length ? pl.items.map(rowHTML).join("") : `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`}`;
+}
+
 /* ---------- navigazione ---------- */
-const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni" };
+const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni", vMe: "Tu" };
 const LABEL = t => t === "vHome" ? "" : TITLES[t];
 function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : LABEL(tab); }
 function rerender(){
   if (tab === "vHome") renderHome(); else if (tab === "vSubs") renderSubs();
   else if (tab === "vSearch") renderSearch();
+  else if (tab === "vMe") renderMe();
 }
 function go(t){
   if (t === "vHome" && !S.opt.showHome) t = "vSubs";
@@ -1470,12 +1602,13 @@ function go(t){
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === t));
   $("#navHome").hidden = !S.opt.showHome;
   $("#hTitle").textContent = LABEL(t);
-  $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
+  $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs" || t === "vMe");
   $("#btnGear").classList.toggle("on", t === "vSettings");
   if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome(); }
   if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
+  if (t === "vMe") { ME.pl = null; renderMe(); if (tokenOk() && Date.now() - (S.meData?.at || 0) > 3600000) loadMe(); }
   if (t === "vSettings") renderSettings();
   window.scrollTo(0, 0);
 }
@@ -1492,7 +1625,8 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  const t = e.target.closest("[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  if (t.dataset.mypl) return openMyPlaylist(t.dataset.mypl);
   if (t.dataset.ch) return openChannel(t.dataset.ch);
   if (t.dataset.close) return closeSheet(t.dataset.close);
   if (t.dataset.ctab) return chanTab(t.dataset.ctab);
@@ -1522,6 +1656,9 @@ document.addEventListener("click", e => {
   if (a === "share") shareVideo();
   if (a === "vmenu") videoMenu();
   if (a === "closeMenu") closeMenu();
+  if (a === "meLogin") return startLogin({ do: "me" });
+  if (a === "meLiked") return openMyPlaylist("liked");
+  if (a === "meBack") { ME.pl = null; renderMe(); return window.scrollTo(0, 0); }
   if (a === "cCC") { ctlShow(true); return ccMenu(); }
   if (a === "ccOff") { closeMenu(); return ccOff(); }
   if (a && a.startsWith("cc:")) {
@@ -1593,7 +1730,7 @@ $("#csvFile").addEventListener("change", async e => {
   catch (err) { renderChannels(err.message, true); }
 });
 
-$("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
+$("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : tab === "vMe" ? loadMe(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
 $("#btnGear").onclick = () => { closeSheets(); go("vSettings"); };
@@ -1608,7 +1745,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
   const sheetOpen = () => !!document.querySelector(".sheet.open,.menu");
   const set = (px, rot) => { el.style.transform = `translateY(${px - 50}px) rotate(${rot}deg)`; el.style.opacity = Math.min(1, px / LIMIT); };
   addEventListener("touchstart", e => {
-    if (window.scrollY > 0 || sheetOpen() || !(tab === "vHome" || tab === "vSubs") || e.touches.length > 1) { y0 = null; return; }
+    if (window.scrollY > 0 || sheetOpen() || !(tab === "vHome" || tab === "vSubs" || tab === "vMe") || e.touches.length > 1) { y0 = null; return; }
     y0 = e.touches[0].clientY; d = 0; el.classList.remove("back");
   }, { passive: true });
   addEventListener("touchmove", e => {
@@ -1623,7 +1760,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
     if (d >= LIMIT) {
       el.classList.add("back"); set(LIMIT, 0); el.classList.add("go");
       try { if (navigator.vibrate) navigator.vibrate(10); } catch {}
-      await (tab === "vHome" ? loadHome(true) : refresh(true));
+      await (tab === "vHome" ? loadHome(true) : tab === "vMe" ? loadMe(true) : refresh(true));
       el.classList.remove("go");
     }
     el.classList.add("back"); el.style.transform = "translateY(-50px)"; el.style.opacity = 0;
@@ -1633,7 +1770,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010233009";
+const BUILD = "20261010233429";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1657,6 +1794,8 @@ if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
   go(after.tab || "vSubs");
   if (v) { CACHE.set(v.id, v); openVideo(v.id); postComment(v, after.text); }
+} else if (after?.do === "me") {
+  go("vMe"); loadMe();
 } else if (after?.do === "sub" || after?.do === "rate") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video") || "null"); } catch {}
   go(after.tab || "vSubs");
