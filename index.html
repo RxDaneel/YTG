@@ -214,15 +214,15 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #unmute{position:absolute;left:12px;bottom:12px;z-index:3;border:0;border-radius:999px;padding:8px 14px;background:rgba(20,20,19,.85);color:#fff;font-size:13px;font-weight:600}
 /* controlli propri sotto al video (verticale) o sopra in basso (schermo intero) */
 .pwrap{position:relative;background:#000}
-.ctl{background:var(--bg);padding:2px 6px 6px}
-.crow{display:flex;align-items:center;gap:2px;min-width:0}
-.cb{width:40px;height:40px;border:0;background:none;border-radius:50%;display:grid;place-items:center;color:var(--fg);flex:none}
+.ctl{background:var(--bg);padding:2px 4px 6px}
+.crow{display:flex;align-items:center;gap:0;min-width:0;max-width:100%}
+.cb{width:36px;height:40px;border:0;background:none;border-radius:50%;display:grid;place-items:center;color:var(--fg);flex:none}
 .cb:active{background:var(--raised)}
-.cb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cb svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .cb svg .f{fill:currentColor;stroke:none}
 .cb.txt.on{background:var(--fg);color:var(--bg)}
-.cb.txt{width:auto;padding:0 10px;border-radius:999px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
-#cTime{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-left:6px;white-space:nowrap}
+.cb.txt{width:auto;padding:0 7px;border-radius:999px;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
+#cTime{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;padding-left:4px;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:clip;flex:0 1 auto}
 #cSeek{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;display:block}
 #cSeek::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:linear-gradient(to right,var(--fg) var(--p,0%),var(--line) var(--p,0%))}
 #cSeek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--fg);margin-top:-5px}
@@ -1800,7 +1800,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010233719";
+const BUILD = "20261010234118";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
