@@ -160,7 +160,7 @@ function save(){ try { localStorage.setItem(LS, JSON.stringify(S)); } catch {} }
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let busy = false, query = "", tab = "vFeed";
+let busy = false, query = "", tab = "vFeed", lastError = "";
 
 function toast(msg){
   const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
@@ -274,7 +274,7 @@ async function channelUploads(ch){
     }
     return { ids, strict: true };
   } catch (e) {
-    if (e.status !== 404) throw e;
+    if (e.reason === "quotaExceeded" || /API key|referer|keyInvalid/i.test(e.message)) throw e;
     const j = await api("playlistItems", { part: "contentDetails", playlistId: "UU" + tail, maxResults: n });
     return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: false };
   }
@@ -323,8 +323,10 @@ async function refresh(manual){
     S.videos = vids; S.lastFetch = Date.now(); save(); renderFeed();
     if (firstErr) toast("Alcuni canali non si sono aggiornati");
     else if (manual) toast("Feed aggiornato");
+    lastError = "";
   } catch (e) {
-    toast(e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message);
+    lastError = e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message;
+    toast(lastError); renderFeed();
   } finally { busy = false; $("#btnRefresh").classList.remove("spin"); }
 }
 
@@ -365,6 +367,7 @@ function renderFeed(){
     (!q || x.title.toLowerCase().includes(q) || x.chTitle.toLowerCase().includes(q)));
   if (!list.length) {
     v.innerHTML = `<div class="empty"><h2>${q ? "Nessun risultato" : "Niente da vedere"}</h2><p>${q ? "Prova con un'altra parola." : S.videos.length ? "Hai già visto tutto." : "Tocca aggiorna per caricare i video."}</p>
+      ${lastError && !q ? `<p class="status err">Errore: ${esc(lastError)}</p>` : ""}
       ${q || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica il feed</button></div>`}</div>`;
     return;
   }
