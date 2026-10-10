@@ -8,138 +8,182 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="YTG">
-<meta name="theme-color" content="#14161a">
+<meta name="theme-color" content="#262624">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap">
 <style>
-/* Feed a colonna singola, barra in alto + tab bar in basso, come un'app nativa */
+/* App a colonna singola: barra in alto, contenuto, tab bar fissata al fondo. Palette calda in stile Claude. */
 :root{
-  --bg:#14161a; --surface:#1d2026; --raised:#262a31; --line:#2f343c;
-  --fg:#ece8e0; --muted:#9a9ca3; --accent:#e8b44d; --danger:#ef6f5e;
+  --bg:#faf9f5; --surface:#f0eee6; --raised:#e8e6dc; --line:#e3dfd3;
+  --fg:#141413; --muted:#6b6a64; --accent:#c96442; --on-accent:#fff; --danger:#b5452f;
+  --glass:rgba(250,249,245,.9);
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
   --top:env(safe-area-inset-top,0px); --bot:env(safe-area-inset-bottom,0px);
-  color-scheme:dark;
+  --nav-h:58px;
 }
+@media (prefers-color-scheme:dark){:root{
+  --bg:#262624; --surface:#30302e; --raised:#3a3a37; --line:#40403c;
+  --fg:#faf9f5; --muted:#a6a39a; --accent:#d97757; --on-accent:#fff; --danger:#e5826b;
+  --glass:rgba(38,38,36,.9); color-scheme:dark;
+}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
-button,input{font:inherit;color:inherit}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
+button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 [hidden]{display:none!important}
 a{color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-header{position:fixed;inset:0 0 auto 0;z-index:20;background:color-mix(in srgb,var(--bg) 92%,transparent);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:calc(var(--top) + 8px) 16px 8px;
-  display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
-header h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.01em;flex:1;display:flex;align-items:center;gap:8px}
-header h1 i{width:9px;height:9px;border-radius:50%;background:var(--accent);display:inline-block}
-.icon-btn{width:38px;height:38px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center}
+header{position:fixed;top:0;left:0;right:0;z-index:20;background:var(--glass);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:calc(var(--top) + 6px) 8px 6px 16px;
+  display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line)}
+header h1{font:600 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
+header h1 i{width:10px;height:10px;border-radius:3px;background:var(--accent);flex:none;transform:rotate(45deg)}
+.icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
 .icon-btn:active{background:var(--raised)}
-.icon-btn svg{width:22px;height:22px;stroke:var(--fg);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.badge{position:absolute;top:4px;right:3px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
 .spin svg{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-#search{position:fixed;left:0;right:0;z-index:19;top:calc(var(--top) + 55px);padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--line)}
-#search input{width:100%;padding:10px 14px;border-radius:12px;border:0;background:var(--raised);outline:none}
 
-main{padding:calc(var(--top) + 66px) 0 calc(var(--bot) + 76px)}
-main.searching{padding-top:calc(var(--top) + 122px)}
-.view{max-width:720px;margin:0 auto}
+main{padding:calc(var(--top) + 62px) 0 calc(var(--bot) + var(--nav-h) + 16px)}
+.view{max-width:760px;margin:0 auto}
 
-nav{position:fixed;inset:auto 0 0 0;z-index:20;display:flex;background:color-mix(in srgb,var(--bg) 94%,transparent);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);padding-bottom:var(--bot)}
-nav button{flex:1;border:0;background:none;padding:8px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--muted)}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;background:var(--glass);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);
+  padding-bottom:var(--bot);transform:translateZ(0)}
+nav button{flex:1;height:var(--nav-h);border:0;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--muted)}
 nav button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-nav button[aria-current="true"]{color:var(--fg)}
+nav button[aria-current="true"]{color:var(--fg);font-weight:600}
 nav button[aria-current="true"] svg{stroke:var(--accent)}
 
+.searchbar{display:flex;gap:8px;padding:12px 16px 4px}
+.searchbar input{flex:1;min-width:0;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:var(--surface);outline:none}
+.searchbar input:focus{border-color:var(--accent)}
+
 .group{padding:18px 16px 8px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
-.card{display:block;width:100%;text-align:left;border:0;background:none;padding:0 0 18px}
+.card{display:block;width:100%;text-align:left;border:0;background:none;padding:0 0 20px}
 .thumb{position:relative;aspect-ratio:16/9;background:var(--surface);overflow:hidden;max-width:100%}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.dur{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.8);color:#fff;font-size:12px;font-weight:600;padding:2px 5px;border-radius:4px;font-variant-numeric:tabular-nums}
+.dur{position:absolute;right:8px;bottom:8px;background:rgba(20,20,19,.82);color:#faf9f5;font-size:12px;font-weight:600;padding:2px 5px;border-radius:4px;font-variant-numeric:tabular-nums}
 .live{background:var(--danger)}
 .seen .thumb::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
 .seen .thumb img{opacity:.55}
 .meta{display:flex;gap:12px;padding:10px 16px 0}
 .avatar{width:36px;height:36px;border-radius:50%;flex:none;background:var(--raised);object-fit:cover}
-.meta div{min-width:0}
+.meta>div{min-width:0}
 .title{font-weight:600;font-size:15px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sub{color:var(--muted);font-size:13px;margin-top:3px}
 
 .empty{padding:48px 24px;text-align:center;color:var(--muted)}
-.empty h2{color:var(--fg);font-size:19px;margin:0 0 8px}
-.btn{border:0;border-radius:999px;padding:11px 20px;background:var(--accent);color:#1a1408;font-weight:650}
+.empty h2{color:var(--fg);font:600 21px/1.25 var(--serif);margin:0 0 8px}
+.btn{border:0;border-radius:10px;padding:10px 18px;background:var(--accent);color:var(--on-accent);font-weight:600;text-decoration:none;display:inline-block}
 .btn.ghost{background:var(--raised);color:var(--fg)}
 .btn:disabled{opacity:.5}
 .row-btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:18px}
 
 .section{padding:16px}
-.section h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 0 10px;font-weight:600}
+.section h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 0 10px;font-weight:600}
 .panel{background:var(--surface);border-radius:14px;overflow:hidden}
 .field{display:flex;gap:8px;padding:12px}
 .field input{flex:1;min-width:0;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);outline:none}
 .list-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-top:1px solid var(--line)}
 .list-item:first-child{border-top:0}
-.list-item span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list-item>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .list-item .x{border:0;background:none;color:var(--muted);font-size:13px;padding:6px 8px}
 .toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-top:1px solid var(--line)}
 .toggle:first-child{border-top:0}
 .toggle small{display:block;color:var(--muted);font-size:12px}
-.switch{appearance:none;width:48px;height:29px;border-radius:99px;background:var(--line);position:relative;flex:none;transition:background .2s}
-.switch::after{content:"";position:absolute;top:3px;left:3px;width:23px;height:23px;border-radius:50%;background:#fff;transition:transform .2s}
+.switch{appearance:none;-webkit-appearance:none;width:48px;height:29px;border-radius:99px;background:var(--line);position:relative;flex:none;transition:background .2s;margin:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:23px;height:23px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s}
 .switch:checked{background:var(--accent)}
 .switch:checked::after{transform:translateX(19px)}
+select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .help{color:var(--muted);font-size:13px;line-height:1.55;padding:0 4px}
 .help ol{padding-left:20px;margin:8px 0}
+.help code{background:var(--raised);padding:1px 4px;border-radius:4px;font-size:12px;word-break:break-all}
 .status{font-size:13px;color:var(--muted);padding:8px 4px}
 .status.err{color:var(--danger)}
 
-#player{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;padding-top:var(--top);padding-bottom:var(--bot);
-  transform:translateY(100%);transition:transform .28s ease}
-#player.open{transform:none}
-.pbar{display:flex;align-items:center;gap:6px;padding:6px 8px}
-.pbar .grow{flex:1}
+.sheet{position:fixed;inset:0;z-index:40;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding-top:var(--top);padding-bottom:calc(var(--bot) + 24px);transform:translateY(100%);transition:transform .28s ease;visibility:hidden}
+.sheet.open{transform:none;visibility:visible}
+.pbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--bg)}
+.pbar h3{flex:1;margin:0;font:600 19px var(--serif)}
 .frame{aspect-ratio:16/9;background:#000;width:100%;max-width:100%}
 .frame iframe{width:100%;height:100%;border:0;display:block}
 .pinfo{padding:14px 16px}
-.pinfo h2{font-size:18px;line-height:1.3;margin:0 0 8px;text-wrap:balance}
+.pinfo h2{font:600 20px/1.3 var(--serif);margin:0 0 8px;text-wrap:balance}
 .chan{display:flex;align-items:center;gap:10px;margin:12px 0}
-.desc{white-space:pre-wrap;color:var(--muted);font-size:14px;background:var(--surface);border-radius:12px;padding:12px;max-height:5.5em;overflow:hidden;position:relative}
+.desc{white-space:pre-wrap;color:var(--muted);font-size:14px;background:var(--surface);border-radius:12px;padding:12px;max-height:5.5em;overflow:hidden;overflow-wrap:anywhere}
 .desc.full{max-height:none}
-.more{border:0;background:none;color:var(--accent);padding:8px 0;font-size:14px}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bot) + 84px);background:var(--raised);padding:10px 16px;border-radius:12px;z-index:50;font-size:14px;max-width:calc(100% - 32px)}
-@media (prefers-reduced-motion:reduce){#player{transition:none}.spin svg{animation:none}}
+.more{border:0;background:none;color:var(--accent);padding:8px 0;font-size:14px;font-weight:600}
+
+.comments h3{font:600 17px var(--serif);margin:22px 0 12px}
+.cform{display:flex;gap:8px;align-items:flex-end;margin-bottom:16px}
+.cform textarea{flex:1;min-width:0;resize:none;min-height:42px;max-height:140px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);outline:none}
+.cform textarea:focus{border-color:var(--accent)}
+.cmt{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.cmt .avatar{width:30px;height:30px}
+.cmt>div{min-width:0;flex:1}
+.cmt b{font-size:13px}
+.cmt p{margin:3px 0 4px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}
+.cmt .sub{margin:0}
+.replies{margin-top:6px}
+.replies .cmt{border-top:0;padding:6px 0}
+
+.notif{display:flex;gap:12px;padding:10px 16px;width:100%;border:0;background:none;text-align:left;align-items:center}
+.notif.new{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.notif img.t{width:120px;aspect-ratio:16/9;object-fit:cover;border-radius:8px;flex:none;background:var(--surface)}
+.notif>div{min-width:0}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bot) + var(--nav-h) + 14px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:12px;z-index:60;font-size:14px;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}.spin svg{animation:none}}
 </style>
 </head>
 <body>
 
 <header>
-  <h1><i></i><span id="hTitle">Iscrizioni</span></h1>
+  <h1><i></i><span id="hTitle">Home</span></h1>
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+  <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
 </header>
-<div id="search" hidden><input id="q" type="search" placeholder="Cerca nei video dei tuoi canali" autocomplete="off"></div>
 
-<main id="main">
-  <section class="view" id="vFeed"></section>
+<main>
+  <section class="view" id="vHome"></section>
+  <section class="view" id="vSubs" hidden></section>
+  <section class="view" id="vSearch" hidden></section>
   <section class="view" id="vChannels" hidden></section>
   <section class="view" id="vSettings" hidden></section>
 </main>
 
-<nav>
-  <button data-tab="vFeed" aria-current="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 9h18"/></svg>Feed</button>
+<nav id="nav">
+  <button data-tab="vHome" id="navHome"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-tab="vSubs"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M7 3.5h10M5 5.2h14"/><path d="m10.5 11 4 2.5-4 2.5z"/></svg>Iscrizioni</button>
   <button data-tab="vChannels"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.5M18 15c1.6.7 2.6 2.3 3 5"/></svg>Canali</button>
-  <button data-tab="vSettings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.6 14H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1H21a2 2 0 1 1 0 4h-.1c-.7 0-1.3.4-1.5 1z"/></svg>Impostazioni</button>
+  <button data-tab="vSettings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Impostazioni</button>
 </nav>
 
-<div id="player" aria-hidden="true">
+<div class="sheet" id="player" aria-hidden="true">
   <div class="pbar">
     <button class="icon-btn" id="pClose" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
-    <span class="grow"></span>
+    <span style="flex:1"></span>
     <a class="icon-btn" id="pExt" target="_blank" rel="noopener" aria-label="Apri nel browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
   </div>
   <div class="frame" id="pFrame"></div>
   <div class="pinfo" id="pInfo"></div>
+</div>
+
+<div class="sheet" id="notifs" aria-hidden="true">
+  <div class="pbar">
+    <button class="icon-btn" id="nClose" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+    <h3>Notifiche</h3>
+  </div>
+  <div id="nList"></div>
 </div>
 
 <input type="file" id="csvFile" accept=".csv,text/csv,text/plain" hidden>
@@ -150,28 +194,34 @@ const API = "https://www.googleapis.com/youtube/v3/";
 const LS = "ytg.v1";
 
 /* ---------- stato ---------- */
+const DEF_OPT = { hideWatched: false, perChannel: 8, showHome: true, region: "IT" };
 const S = Object.assign({
-  key: "", clientId: "", token: "", tokenExp: 0, me: null, lastSync: 0,
-  channels: [], videos: [], lastFetch: 0, watched: {},
-  opt: { hideWatched: false, showLive: true, perChannel: 8 }
+  key: "", clientId: "", token: "", tokenExp: 0, tokenScope: "", me: null, lastSync: 0,
+  channels: [], videos: [], lastFetch: 0, watched: {}, avatars: {}, noLF: {},
+  home: [], homeFetch: 0, seenNotif: 0
 }, load());
+S.opt = Object.assign({}, DEF_OPT, S.opt || {});
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
 function save(){ try { localStorage.setItem(LS, JSON.stringify(S)); } catch {} }
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let busy = false, query = "", tab = "vFeed", lastError = "";
+let busy = false, homeBusy = false, tab = "vHome", lastError = "", homeError = "";
+let searchQ = "", searchRes = null, searchBusy = false, searchErr = "";
+const CACHE = new Map();           // tutti i video visti (iscrizioni, home, ricerca) per aprirli nel player
+const remember = list => { list.forEach(v => CACHE.set(v.id, v)); return list; };
+remember(S.videos); remember(S.home);
 
 function toast(msg){
+  document.querySelectorAll(".toast").forEach(t => t.remove());
   const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
-  document.body.appendChild(t); setTimeout(() => t.remove(), 3200);
+  document.body.appendChild(t); setTimeout(() => t.remove(), 3400);
 }
 
 /* ---------- API ---------- */
 async function api(path, params){
   if (!S.key) throw new Error("Manca la chiave API: aggiungila in Impostazioni.");
-  const qs = new URLSearchParams({ ...params, key: S.key });
-  const r = await fetch(API + path + "?" + qs);
+  const r = await fetch(API + path + "?" + new URLSearchParams({ ...params, key: S.key }));
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     const e = new Error(j.error?.message || ("Errore " + r.status));
@@ -180,43 +230,48 @@ async function api(path, params){
   return j;
 }
 
-/* ---------- accesso Google (OAuth, sola lettura) ---------- */
-const SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
+/* ---------- accesso Google (OAuth) ---------- */
+const SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl";   // lettura iscrizioni + scrittura commenti
 const redirectUri = () => location.origin + location.pathname.replace(/index\.html$/, "");
-const tokenOk = () => S.token && Date.now() < S.tokenExp - 60000;
+const tokenOk = () => S.token && S.tokenScope === SCOPE && Date.now() < S.tokenExp - 60000;
 
-function startLogin(){
-  if (!S.clientId) { toast("Prima inserisci l'ID client in Impostazioni"); go("vSettings"); return; }
+function startLogin(after){
+  if (!S.clientId) { toast("Prima inserisci l'ID client in Impostazioni"); closeSheets(); go("vSettings"); return; }
   const state = Math.random().toString(36).slice(2);
-  try { sessionStorage.setItem("ytg.state", state); } catch {}
+  try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: "token",
     scope: SCOPE, include_granted_scopes: "true", state, ...(S.me ? {} : { prompt: "select_account" }) });
   location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
 
 function readLoginReturn(){
-  if (!location.hash.includes("access_token") && !location.hash.includes("error=")) return false;
+  if (!location.hash.includes("access_token") && !location.hash.includes("error=")) return null;
   const h = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, "", location.pathname);
-  if (h.get("error")) { setTimeout(() => toast("Accesso annullato: " + h.get("error")), 300); return false; }
-  let st = null; try { st = sessionStorage.getItem("ytg.state"); } catch {}
-  if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return false; }
-  S.token = h.get("access_token"); S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
-  return true;
+  let st = null, after = { do: "sync" };
+  try { st = sessionStorage.getItem("ytg.state"); after = JSON.parse(sessionStorage.getItem("ytg.after")) || after; } catch {}
+  if (h.get("error")) { setTimeout(() => toast("Accesso annullato"), 300); return null; }
+  if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return null; }
+  S.token = h.get("access_token"); S.tokenScope = SCOPE;
+  S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
+  return after;
 }
 
-async function apiAuth(path, params){
-  const r = await fetch(API + path + "?" + new URLSearchParams(params), { headers: { Authorization: "Bearer " + S.token } });
+async function apiAuth(path, params, body){
+  const r = await fetch(API + path + "?" + new URLSearchParams(params), {
+    method: body ? "POST" : "GET",
+    headers: { Authorization: "Bearer " + S.token, ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { S.token = ""; save(); throw new Error("Sessione scaduta: accedi di nuovo"); }
-  if (!r.ok) throw new Error(j.error?.message || ("Errore " + r.status));
+  if (r.status === 401) { S.token = ""; save(); const e = new Error("Sessione scaduta: accedi di nuovo"); e.relogin = true; throw e; }
+  if (!r.ok) { const e = new Error(j.error?.message || ("Errore " + r.status)); e.reason = j.error?.errors?.[0]?.reason; throw e; }
   return j;
 }
 
 async function syncSubs(){
-  if (!tokenOk()) return startLogin();
+  if (!tokenOk()) return startLogin({ do: "sync" });
   if (busy) return;
-  busy = true; $("#btnRefresh").classList.add("spin");
+  busy = true; spin(true);
   try {
     const me = await apiAuth("channels", { part: "snippet", mine: "true" });
     const c = me.items?.[0];
@@ -234,21 +289,20 @@ async function syncSubs(){
     S.lastSync = Date.now(); S.lastFetch = 0; save();
     toast(`Iscrizioni sincronizzate: ${subs.length} canali`);
   } catch (e) { toast(e.message); }
-  finally { busy = false; $("#btnRefresh").classList.remove("spin"); }
+  finally { busy = false; spin(false); }
   if (tab === "vChannels") renderChannels(); else if (tab === "vSettings") renderSettings();
   refresh();
 }
 
+/* ---------- canali ---------- */
 async function channelInfo(ids){
   const out = [];
   for (let i = 0; i < ids.length; i += 50) {
     const j = await api("channels", { part: "snippet", id: ids.slice(i, i + 50).join(","), maxResults: 50 });
-    for (const c of j.items || []) out.push({ id: c.id, title: c.snippet.title,
-      thumb: c.snippet.thumbnails?.default?.url || "" });
+    for (const c of j.items || []) out.push({ id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url || "" });
   }
   return out;
 }
-
 async function resolveChannel(input){
   input = input.trim();
   const uc = input.match(/UC[\w-]{22}/);
@@ -259,12 +313,48 @@ async function resolveChannel(input){
   if (!j.items?.length) throw new Error("Canale non trovato: " + input);
   return j.items[0].id;
 }
+const avatarOf = id => S.channels.find(c => c.id === id)?.thumb || S.avatars[id] || "";
+async function ensureAvatars(list){
+  const miss = [...new Set(list.map(v => v.ch))].filter(id => !avatarOf(id));
+  if (!miss.length || !S.key) return;
+  try {
+    (await channelInfo(miss.slice(0, 150))).forEach(c => S.avatars[c.id] = c.thumb);
+    const keys = Object.keys(S.avatars); if (keys.length > 600) keys.slice(0, keys.length - 600).forEach(k => delete S.avatars[k]);
+    save(); rerender();
+  } catch {}
+}
 
-/* Playlist "UULF" = solo video normali (niente Shorts, niente dirette). Se non esiste, si usa "UU" + filtro durata.
-   I canali senza UULF vengono ricordati, così la volta dopo si fa una sola richiesta. */
+/* ---------- video ---------- */
+function secs(iso){
+  const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso || "") || [];
+  return (+m[1]||0)*86400 + (+m[2]||0)*3600 + (+m[3]||0)*60 + (+m[4]||0);
+}
+const looksShort = (v, d) => (d > 0 && d <= 180) || /#shorts?\b/i.test(v.snippet.title + " " + (v.snippet.description || "").slice(0, 300));
+function toVideo(v){
+  const t = v.snippet.thumbnails || {}, d = secs(v.contentDetails?.duration);
+  return { id: v.id, title: v.snippet.title, ch: v.snippet.channelId, chTitle: v.snippet.channelTitle,
+    at: v.snippet.publishedAt, dur: d, live: v.snippet.liveBroadcastContent === "live",
+    views: +v.statistics?.viewCount || 0,
+    thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "",
+    desc: (v.snippet.description || "").slice(0, 3000) };
+}
+async function pool(items, size, fn){
+  const out = []; let i = 0;
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (i < items.length) { const k = i++; out[k] = await fn(items[k]).catch(e => ({ error: e })); }
+  }));
+  return out;
+}
+async function videoDetails(ids){
+  const batches = []; for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+  const pages = await pool(batches, 8, b => api("videos", { part: "snippet,contentDetails,statistics", id: b.join(",") }));
+  const firstErr = pages.find(p => p?.error)?.error; if (firstErr && pages.every(p => p?.error)) throw firstErr;
+  return pages.flatMap(p => p?.items || []);
+}
+
+/* Iscrizioni: playlist "UULF" = solo video normali (niente Shorts). Se manca, "UU" + filtro durata. */
 async function channelUploads(ch){
   const tail = ch.id.slice(2), n = S.opt.perChannel;
-  S.noLF = S.noLF || {};
   if (!S.noLF[ch.id]) {
     try {
       const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: n });
@@ -278,57 +368,64 @@ async function channelUploads(ch){
   return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: false };
 }
 
-function secs(iso){
-  const m = /P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso || "") || [];
-  return (+m[1]||0)*86400 + (+m[2]||0)*3600 + (+m[3]||0)*60 + (+m[4]||0);
-}
-
-async function pool(items, size, fn){
-  const out = []; let i = 0;
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k]).catch(e => ({ error: e })); }
-  }));
-  return out;
-}
-
-function progress(done, total){
-  $("#hTitle").textContent = total ? `Aggiorno ${done}/${total}` : TITLES[tab];
-}
+const spin = on => $("#btnRefresh").classList.toggle("spin", on);
+const errMsg = e => e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message;
 
 async function refresh(manual){
   if (busy) return;
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
-  if (!S.channels.length) { if (manual) toast("Nessun canale: importali dalla scheda Canali"); return; }
-  busy = true; $("#btnRefresh").classList.add("spin");
+  if (!S.channels.length) { if (manual) toast("Nessun canale: accedi o aggiungili dalla scheda Canali"); return; }
+  busy = true; spin(true);
   const total = S.channels.length; let done = 0; progress(0, total);
   try {
     const res = await pool(S.channels, 16, ch => channelUploads(ch).finally(() => progress(++done, total)));
     const firstErr = res.find(r => r?.error)?.error;
     if (firstErr && res.every(r => r?.error)) throw firstErr;
-    const lax = new Set(); const all = [];
+    const lax = new Set(), all = [];
     res.forEach(r => { if (r?.ids) { all.push(...r.ids); if (!r.strict) r.ids.forEach(id => lax.add(id)); } });
-    const ids = [...new Set(all)], batches = [];
-    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
-    const pages = await pool(batches, 8, b => api("videos", { part: "snippet,contentDetails", id: b.join(",") }));
     const vids = [];
-    for (const j of pages) for (const v of j?.items || []) {
-      const d = secs(v.contentDetails.duration), live = v.snippet.liveBroadcastContent;
-      if (lax.has(v.id) && d > 0 && d <= 180) continue;          // probabile Short
-      if (live === "upcoming") continue;                            // anteprime non ancora iniziate
-      const t = v.snippet.thumbnails;
-      vids.push({ id: v.id, title: v.snippet.title, ch: v.snippet.channelId, chTitle: v.snippet.channelTitle,
-        at: v.snippet.publishedAt, dur: d, live: live === "live",
-        thumb: (t.maxres || t.standard || t.high || t.medium || t.default).url,
-        desc: (v.snippet.description || "").slice(0, 3000) });
+    for (const v of await videoDetails([...new Set(all)])) {
+      if (v.snippet.liveBroadcastContent === "upcoming") continue;
+      if (lax.has(v.id) && looksShort(v, secs(v.contentDetails.duration))) continue;
+      vids.push(toVideo(v));
     }
     vids.sort((a, b) => b.at.localeCompare(a.at));
-    S.videos = vids; S.lastFetch = Date.now(); lastError = ""; save(); renderFeed();
-    if (firstErr) toast("Alcuni canali non si sono aggiornati");
-    else if (manual) toast("Feed aggiornato");
-  } catch (e) {
-    lastError = e.reason === "quotaExceeded" ? "Quota giornaliera finita: riprova domani" : e.message;
-    toast(lastError); renderFeed();
-  } finally { busy = false; $("#btnRefresh").classList.remove("spin"); progress(0, 0); }
+    if (!S.seenNotif) S.seenNotif = vids[0] ? Date.parse(vids[0].at) : Date.now();
+    S.videos = remember(vids); S.lastFetch = Date.now(); lastError = ""; save();
+    if (firstErr) toast("Alcuni canali non si sono aggiornati"); else if (manual) toast("Iscrizioni aggiornate");
+  } catch (e) { lastError = errMsg(e); toast(lastError); }
+  finally { busy = false; spin(false); progress(0, 0); updateBell(); rerender(); }
+}
+
+/* Home: video di tendenza nel tuo paese (YouTube non dà la home personale tramite API) */
+async function loadHome(manual){
+  if (homeBusy || !S.key) return;
+  homeBusy = true; spin(true);
+  try {
+    const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50 });
+    S.home = remember((j.items || []).filter(v => !looksShort(v, secs(v.contentDetails.duration))).map(toVideo));
+    S.homeFetch = Date.now(); homeError = ""; save();
+    if (manual) toast("Home aggiornata");
+    ensureAvatars(S.home);
+  } catch (e) { homeError = errMsg(e); toast(homeError); }
+  finally { homeBusy = false; spin(false); rerender(); }
+}
+
+/* Ricerca su tutto YouTube (costa 100 unità di quota a ricerca) */
+async function doSearch(q){
+  searchQ = q.trim(); if (!searchQ) return;
+  if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
+  searchBusy = true; searchErr = ""; searchRes = null; renderSearch();
+  try {
+    const j = await api("search", { part: "id", q: searchQ, type: "video", maxResults: 30, regionCode: S.opt.region, relevanceLanguage: "it", safeSearch: "none" });
+    const ids = (j.items || []).map(i => i.id.videoId).filter(Boolean);
+    const det = await videoDetails(ids);
+    const order = new Map(ids.map((id, i) => [id, i]));
+    searchRes = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration)))
+      .sort((a, b) => order.get(a.id) - order.get(b.id)).map(toVideo));
+    ensureAvatars(searchRes);
+  } catch (e) { searchErr = errMsg(e); }
+  finally { searchBusy = false; renderSearch(); }
 }
 
 /* ---------- formattazione ---------- */
@@ -342,8 +439,15 @@ function ago(iso){
   for (const [n, a, b] of u) if (s >= n) { const k = Math.floor(s/n); return k + " " + (k === 1 ? a : b) + " fa"; }
   return "adesso";
 }
+function views(n){
+  if (!n) return "";
+  if (n >= 1e9) return (n/1e9).toFixed(1).replace(".0","").replace(".",",") + " Mrd di visualizzazioni";
+  if (n >= 1e6) return (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln di visualizzazioni";
+  if (n >= 1e3) return Math.round(n/1e3) + "K visualizzazioni";
+  return n + " visualizzazioni";
+}
 function bucket(iso){
-  const d = new Date(iso), now = new Date(); const day = 864e5;
+  const d = new Date(iso), now = new Date(), day = 864e5;
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (d >= start) return "Oggi";
   if (d >= start - day) return "Ieri";
@@ -351,39 +455,68 @@ function bucket(iso){
   if (d >= start - 30*day) return "Questo mese";
   return "Più vecchi";
 }
-const avatarOf = id => S.channels.find(c => c.id === id)?.thumb || "";
+
+function card(x){
+  const bits = [esc(x.chTitle), x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ");
+  return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
+    <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+      ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
+    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch))}" alt="">
+      <div><div class="title">${esc(x.title)}</div><div class="sub">${bits}</div></div></div>
+  </button>`;
+}
+const setupNeeded = () => !S.key
+  ? `<div class="empty"><h2>Benvenuto in YTG</h2><p>Per iniziare aggiungi la chiave API di YouTube.</p><div class="row-btns"><button class="btn" data-go="vSettings">Aggiungi chiave API</button></div></div>` : "";
 
 /* ---------- viste ---------- */
-function renderFeed(){
-  const v = $("#vFeed");
-  if (!S.key || !S.channels.length) {
-    v.innerHTML = `<div class="empty"><h2>Solo i tuoi canali</h2>
-      <p>Nessuna home, nessun consigliato, nessuno Short. ${!S.key ? "Per iniziare aggiungi la chiave API." : "Ora accedi con Google per caricare le tue iscrizioni."}</p>
-      <div class="row-btns">${!S.key ? `<button class="btn" data-go="vSettings">Aggiungi chiave API</button>`
-        : `<button class="btn" data-act="login">Accedi con Google</button><button class="btn ghost" data-go="vChannels">Aggiungi a mano</button>`}</div></div>`;
+function renderHome(){
+  const v = $("#vHome"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
+  const list = S.home.filter(x => !S.opt.hideWatched || !S.watched[x.id]);
+  if (!list.length) {
+    v.innerHTML = `<div class="empty"><h2>${homeBusy ? "Carico la Home…" : "Home vuota"}</h2>
+      ${homeError ? `<p class="status err">Errore: ${esc(homeError)}</p>` : ""}
+      ${homeBusy ? "" : `<div class="row-btns"><button class="btn" data-act="home">Carica la Home</button></div>`}</div>`;
     return;
   }
-  const q = query.toLowerCase();
-  const list = S.videos.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) &&
-    (!q || x.title.toLowerCase().includes(q) || x.chTitle.toLowerCase().includes(q)));
+  v.innerHTML = `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>` + list.map(card).join("");
+}
+
+function renderSubs(){
+  const v = $("#vSubs"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
+  if (!S.channels.length) {
+    v.innerHTML = `<div class="empty"><h2>Solo i tuoi canali</h2><p>Accedi con Google per caricare le tue iscrizioni.</p>
+      <div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button><button class="btn ghost" data-go="vChannels">Aggiungi a mano</button></div></div>`;
+    return;
+  }
+  const list = S.videos.filter(x => !S.opt.hideWatched || !S.watched[x.id]);
   if (!list.length) {
-    v.innerHTML = `<div class="empty"><h2>${q ? "Nessun risultato" : "Niente da vedere"}</h2><p>${q ? "Prova con un'altra parola." : S.videos.length ? "Hai già visto tutto." : "Tocca aggiorna per caricare i video."}</p>
-      ${lastError && !q ? `<p class="status err">Errore: ${esc(lastError)}</p>` : ""}
-      ${q || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica il feed</button></div>`}</div>`;
+    v.innerHTML = `<div class="empty"><h2>${busy ? "Carico i video…" : "Niente da vedere"}</h2>
+      <p>${busy ? "" : S.videos.length ? "Hai già visto tutto." : "Tocca aggiorna per caricare i video."}</p>
+      ${lastError ? `<p class="status err">Errore: ${esc(lastError)}</p>` : ""}
+      ${busy || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica i video</button></div>`}</div>`;
     return;
   }
   let html = "", last = "";
   for (const x of list) {
     const b = bucket(x.at);
     if (b !== last) { html += `<div class="group">${b}</div>`; last = b; }
-    html += `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
-      <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
-        ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
-      <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch))}" alt="">
-        <div><div class="title">${esc(x.title)}</div><div class="sub">${esc(x.chTitle)} · ${ago(x.at)}</div></div></div>
-    </button>`;
+    html += card(x);
   }
   v.innerHTML = html;
+}
+
+function renderSearch(){
+  const v = $("#vSearch");
+  if (!v.querySelector("#sForm")) {
+    v.innerHTML = `<form class="searchbar" id="sForm"><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca su YouTube" autocomplete="off">
+      <button class="btn" type="submit">Cerca</button></form><div id="sRes"></div>`;
+  }
+  const r = $("#sRes");
+  if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}”…</p></div>`;
+  else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
+  else if (searchRes && !searchRes.length) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
+  else if (searchRes) r.innerHTML = `<div class="group">Risultati per “${esc(searchQ)}”</div>` + searchRes.map(card).join("");
+  else r.innerHTML = `<div class="empty"><p>Cerca tra tutti i video di YouTube. Gli Shorts vengono esclusi.</p></div>`;
 }
 
 function renderChannels(status, isErr){
@@ -394,107 +527,196 @@ function renderChannels(status, isErr){
     <div class="panel"><div class="list-item">
       ${S.me ? `<img class="avatar" src="${esc(S.me.thumb)}" alt=""><span style="white-space:normal"><b>${esc(S.me.title)}</b><br><small style="color:var(--muted)">${S.lastSync ? "Sincronizzato " + ago(new Date(S.lastSync).toISOString()) : ""}</small></span>
         <button class="btn" data-act="sync">Sincronizza</button>`
-      : `<span style="white-space:normal">Accedi per caricare automaticamente i canali a cui sei iscritto.</span><button class="btn" data-act="login">Accedi</button>`}
+      : `<span style="white-space:normal">Accedi per caricare i canali a cui sei iscritto e per commentare.</span><button class="btn" data-act="login">Accedi</button>`}
     </div></div>
     <h2 style="margin-top:22px">Aggiungi un canale</h2>
     <div class="panel"><form class="field" id="addForm">
       <input id="addIn" placeholder="@nomecanale o link del canale" autocapitalize="off" autocorrect="off">
       <button class="btn" type="submit">Aggiungi</button></form></div>
-    <h2 style="margin-top:22px">Importa tutte le iscrizioni</h2>
-    <div class="panel" style="padding:14px">
-      <div class="help">Da Google Takeout scarica solo <b>YouTube e YouTube Music → iscrizioni</b>, poi apri qui il file <b>subscriptions.csv</b> (lo trovi nell'app File dopo aver estratto lo zip).</div>
-      <div class="row-btns" style="justify-content:flex-start"><button class="btn ghost" data-act="csv">Scegli subscriptions.csv</button>
-      <a class="btn ghost" style="text-decoration:none" href="https://takeout.google.com/" target="_blank" rel="noopener">Apri Takeout</a></div>
-    </div>
+    <div class="help" style="margin-top:8px">Oppure importa il file <b>subscriptions.csv</b> di Google Takeout: <button class="more" data-act="csv">scegli il file</button></div>
     ${status ? `<div class="status${isErr ? " err" : ""}">${esc(status)}</div>` : ""}
     <h2 style="margin-top:22px">I tuoi canali · ${S.channels.length}</h2>
     <div class="panel">${sorted.length ? sorted.map(c => `<div class="list-item">
-      <img class="avatar" src="${esc(c.thumb)}" alt=""><span>${esc(c.title)}</span>
+      <img class="avatar" loading="lazy" src="${esc(c.thumb)}" alt=""><span>${esc(c.title)}</span>
       <button class="x" data-del="${c.id}">Rimuovi</button></div>`).join("") : `<div class="status" style="padding:14px">Ancora nessun canale.</div>`}</div>
   </div>`;
 }
+
+const REGIONS = { IT: "Italia", US: "Stati Uniti", GB: "Regno Unito", DE: "Germania", FR: "Francia", ES: "Spagna", JP: "Giappone" };
+const regionName = c => REGIONS[c] || c;
 
 function renderSettings(){
   const v = $("#vSettings"), o = S.opt;
   const masked = S.key ? S.key.slice(0, 6) + "…" + S.key.slice(-4) : "";
   v.innerHTML = `<div class="section">
-    <h2>Chiave API YouTube</h2>
+    <h2>Contenuti</h2>
+    <div class="panel">
+      <label class="toggle"><div>Mostra la Home<small>Video di tendenza. Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
+      <label class="toggle"><div>Paese della Home e della ricerca</div>
+        <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${k}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
+      <label class="toggle"><div>Video per canale<small>Quanti video recenti caricare da ogni iscrizione</small></div>
+        <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+    </div>
+    <div class="help" style="margin-top:10px">Gli Shorts sono sempre esclusi. Quota gratuita: 10.000 unità al giorno. Aggiornare le iscrizioni ne usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)}, la Home 1, ogni ricerca circa 101, ogni commento inviato 50.</div>
+
+    <h2 style="margin-top:22px">Chiave API YouTube</h2>
     <div class="panel"><form class="field" id="keyForm">
       <input id="keyIn" placeholder="${masked ? "Salvata: " + esc(masked) : "Incolla qui la chiave"}" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="btn" type="submit">Salva</button></form></div>
-    <div class="help"><ol>
-      <li>Apri <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> e crea un progetto.</li>
-      <li>In <b>API e servizi → Libreria</b> attiva <b>YouTube Data API v3</b>.</li>
-      <li>In <b>Credenziali → Crea credenziali → Chiave API</b>, copia la chiave e incollala qui.</li>
-      <li>Consigliato: limita la chiave a questo sito (Restrizioni applicazione → Siti web → <code>${esc(location.host || "tuosito")}/*</code>).</li>
-    </ol>La chiave resta solo su questo telefono, non nel codice del sito.</div>
 
     <h2 style="margin-top:22px">Accesso con Google</h2>
     <div class="panel"><form class="field" id="clientForm">
       <input id="clientIn" placeholder="${S.clientId ? "Salvato: …" + esc(S.clientId.slice(-30)) : "ID client OAuth"}" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button class="btn" type="submit">Salva</button></form></div>
-    <div class="help"><ol>
-      <li>Nella console apri <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a> → <b>Inizia</b>: nome app <b>YTG</b>, la tua email, pubblico <b>Esterno</b>, poi crea.</li>
-      <li>In <a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">Pubblico</a> → <b>Utenti di test</b> aggiungi la tua email Google.</li>
-      <li>In <a href="https://console.cloud.google.com/auth/clients" target="_blank" rel="noopener">Client</a> → <b>Crea client</b> → tipo <b>Applicazione web</b>.<br>
-        Origini JavaScript autorizzate: <code>${esc(location.origin)}</code><br>
-        URI di reindirizzamento autorizzati: <code>${esc(redirectUri())}</code></li>
-      <li>Copia l'<b>ID client</b> (finisce con <code>.apps.googleusercontent.com</code>) e incollalo qui.</li>
-    </ol>Al primo accesso Google avvisa che l'app non è verificata: tocca <b>Continua</b>, è la tua.</div>
-
-    <h2 style="margin-top:22px">Feed</h2>
-    <div class="panel">
-      <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
-      <label class="toggle"><div>Video per canale<small>Più video = più storico, stessa quota</small></div>
-        <select id="o_n" style="background:var(--raised);border:0;border-radius:8px;padding:6px 8px;color:var(--fg)">
-          ${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-    </div>
-    <div class="help" style="margin-top:10px">Gli Shorts e i consigliati non esistono in quest'app. Ogni aggiornamento usa circa ${S.channels.length + Math.ceil(S.channels.length * o.perChannel / 50)} unità delle 10.000 gratuite al giorno.</div>
+    <div class="help">Indirizzi da registrare nel client della console Google:<br>
+      Origini JavaScript: <code>${esc(location.origin)}</code><br>
+      URI di reindirizzamento: <code>${esc(redirectUri())}</code></div>
 
     <h2 style="margin-top:22px">Dati</h2>
     <div class="panel">
       <button class="toggle" style="width:100%;border:0;background:none;text-align:left" data-act="clearSeen">Azzera i video visti</button>
-      <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--danger)" data-act="reset" id="resetBtn">Cancella tutto</button>
+      <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--danger)" data-act="reset">Cancella tutto</button>
     </div>
-    <div class="status">${S.lastFetch ? "Ultimo aggiornamento: " + ago(new Date(S.lastFetch).toISOString()) : ""}</div>
+    <div class="status">${S.lastFetch ? "Iscrizioni aggiornate " + ago(new Date(S.lastFetch).toISOString()) : ""}</div>
   </div>`;
 }
 
-/* ---------- player ---------- */
+/* ---------- notifiche: nuovi video dei tuoi canali dall'ultima volta ---------- */
+const newVideos = () => S.videos.filter(v => Date.parse(v.at) > S.seenNotif);
+function updateBell(){
+  const n = newVideos().length, b = $("#bellBadge");
+  b.hidden = !n; b.textContent = n > 99 ? "99+" : n;
+}
+function openNotifs(){
+  const fresh = new Set(newVideos().map(v => v.id));
+  const list = S.videos.slice(0, Math.max(30, fresh.size));
+  $("#nList").innerHTML = list.length ? list.map(x => `<button class="notif${fresh.has(x.id) ? " new" : ""}" data-v="${x.id}">
+      <img class="t" loading="lazy" src="${esc(x.thumb)}" alt="">
+      <div><div class="title" style="font-size:14px">${esc(x.chTitle)} ha caricato: ${esc(x.title)}</div><div class="sub">${ago(x.at)}</div></div></button>`).join("")
+    : `<div class="empty"><p>Nessuna notifica. Qui compaiono i nuovi video dei canali a cui sei iscritto.</p></div>`;
+  S.seenNotif = Date.now(); save(); updateBell();
+  openSheet("#notifs");
+}
+
+/* ---------- player e commenti ---------- */
+let current = null, cPage = "";
+function openSheet(sel){ const p = $(sel); p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; }
+function closeSheets(){
+  document.querySelectorAll(".sheet.open").forEach(p => { p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); });
+  setTimeout(() => { if (!$("#player").classList.contains("open")) $("#pFrame").innerHTML = ""; }, 300);
+}
+
 function openVideo(id){
-  const x = S.videos.find(v => v.id === id); if (!x) return;
-  S.watched[id] = Date.now(); save();
-  $("#pFrame").innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&playsinline=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${esc(x.title)}"></iframe>`;
+  const x = CACHE.get(id); if (!x) return;
+  $("#notifs").classList.remove("open");
+  current = x; S.watched[id] = Date.now(); save();
+  $("#pFrame").innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen title="${esc(x.title)}"></iframe>`;
   $("#pExt").href = "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
-  const more = S.videos.filter(v => v.ch === x.ch && v.id !== id).slice(0, 6);
+  const more = S.videos.filter(v => v.ch === x.ch && v.id !== id).slice(0, 5);
   $("#pInfo").innerHTML = `<h2>${esc(x.title)}</h2>
-    <div class="sub">${ago(x.at)}${x.dur ? " · " + fmtDur(x.dur) : ""}</div>
+    <div class="sub">${[x.views ? views(x.views) : "", ago(x.at), x.dur ? fmtDur(x.dur) : ""].filter(Boolean).join(" · ")}</div>
     <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt=""><b>${esc(x.chTitle)}</b></div>
     ${x.desc ? `<div class="desc" id="pDesc">${esc(x.desc)}</div><button class="more" data-act="desc">Mostra tutto</button>` : ""}
+    <div class="comments">
+      <h3>Commenti</h3>
+      <form class="cform" id="cForm"><textarea id="cIn" rows="1" placeholder="${S.clientId ? "Aggiungi un commento…" : "Configura l'accesso Google per commentare"}" ${S.clientId ? "" : "disabled"}></textarea>
+        <button class="btn" type="submit" ${S.clientId ? "" : "disabled"}>Invia</button></form>
+      <div id="cList"><div class="status">Carico i commenti…</div></div>
+      <button class="more" id="cMore" data-act="moreComments" hidden>Carica altri commenti</button>
+    </div>
     ${more.length ? `<div class="group" style="padding-left:0">Altri video di ${esc(x.chTitle)}</div>` + more.map(m => `
       <button class="card" data-v="${m.id}" style="display:flex;gap:10px;padding-bottom:12px">
         <div class="thumb" style="width:42%;flex:none;border-radius:8px"><img loading="lazy" src="${esc(m.thumb)}" alt="">${m.dur ? `<span class="dur">${fmtDur(m.dur)}</span>` : ""}</div>
         <div style="min-width:0"><div class="title" style="font-size:14px">${esc(m.title)}</div><div class="sub">${ago(m.at)}</div></div></button>`).join("") : ""}`;
-  const p = $("#player"); p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0;
-  renderFeed();
+  openSheet("#player");
+  cPage = ""; loadComments(true);
+  rerender();
 }
-function closeVideo(){
-  const p = $("#player"); p.classList.remove("open"); p.setAttribute("aria-hidden", "true");
-  setTimeout(() => { if (!p.classList.contains("open")) $("#pFrame").innerHTML = ""; }, 300);
+
+function commentHTML(c, replies){
+  const s = c.snippet;
+  return `<div class="cmt"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
+    <div><b>${esc(s.authorDisplayName)}</b> <span class="sub">· ${ago(s.publishedAt)}${s.updatedAt !== s.publishedAt ? " (modificato)" : ""}</span>
+      <p>${esc(s.textOriginal ?? s.textDisplay)}</p>
+      <div class="sub">${s.likeCount ? "♥ " + s.likeCount : ""}</div>
+      ${replies || ""}</div></div>`;
+}
+
+async function loadComments(first){
+  const vid = current.id, list = $("#cList"), moreBtn = $("#cMore");
+  try {
+    const j = await api("commentThreads", { part: "snippet,replies", videoId: vid, maxResults: 20, order: "relevance", textFormat: "plainText", ...(cPage ? { pageToken: cPage } : {}) });
+    if (current?.id !== vid) return;
+    const html = (j.items || []).map(t => {
+      const top = t.snippet.topLevelComment, n = t.snippet.totalReplyCount;
+      const rep = n ? `<div class="replies" id="r_${t.id}"><button class="more" data-replies="${t.id}">Mostra ${n} rispost${n === 1 ? "a" : "e"}</button></div>` : "";
+      return commentHTML(top, rep);
+    }).join("");
+    if (first) list.innerHTML = html || `<div class="status">Ancora nessun commento.</div>`;
+    else list.insertAdjacentHTML("beforeend", html);
+    cPage = j.nextPageToken || ""; moreBtn.hidden = !cPage;
+  } catch (e) {
+    if (current?.id !== vid) return;
+    list.innerHTML = `<div class="status">${e.reason === "commentsDisabled" ? "I commenti sono disattivati per questo video." : "Commenti non disponibili: " + esc(errMsg(e))}</div>`;
+    moreBtn.hidden = true;
+  }
+}
+
+async function loadReplies(parentId){
+  const box = $("#r_" + parentId); box.innerHTML = `<div class="status">Carico…</div>`;
+  try {
+    const j = await api("comments", { part: "snippet", parentId, maxResults: 50, textFormat: "plainText" });
+    const items = (j.items || []).sort((a, b) => a.snippet.publishedAt.localeCompare(b.snippet.publishedAt));
+    box.innerHTML = items.map(c => commentHTML(c)).join("") || `<div class="status">Nessuna risposta.</div>`;
+  } catch (e) { box.innerHTML = `<div class="status err">${esc(errMsg(e))}</div>`; }
+}
+
+async function postComment(video, text){
+  if (!tokenOk()) {
+    try { sessionStorage.setItem("ytg.video", JSON.stringify(video)); } catch {}
+    return startLogin({ do: "comment", text, video: video.id, tab });
+  }
+  const btn = $("#cForm button"); if (btn) btn.disabled = true;
+  try {
+    const j = await apiAuth("commentThreads", { part: "snippet" },
+      { snippet: { videoId: video.id, topLevelComment: { snippet: { textOriginal: text } } } });
+    const s = j.snippet?.topLevelComment?.snippet;
+    if (s && current?.id === video.id) {
+      $("#cIn").value = "";
+      const list = $("#cList"); if (list.querySelector(".status")) list.innerHTML = "";
+      list.insertAdjacentHTML("afterbegin", commentHTML({ snippet: { ...s, authorDisplayName: s.authorDisplayName || S.me?.title || "Tu",
+        authorProfileImageUrl: s.authorProfileImageUrl || S.me?.thumb || "", publishedAt: s.publishedAt || new Date().toISOString(), updatedAt: s.publishedAt } }));
+    }
+    toast("Commento pubblicato");
+  } catch (e) {
+    if (e.relogin || e.reason === "insufficientPermissions" || e.reason === "ACCESS_TOKEN_SCOPE_INSUFFICIENT") {
+      S.token = ""; save(); return postComment(video, text);
+    }
+    toast("Commento non inviato: " + errMsg(e));
+  } finally { if (btn) btn.disabled = false; }
 }
 
 /* ---------- navigazione ---------- */
-const TITLES = { vFeed: "Iscrizioni", vChannels: "Canali", vSettings: "Impostazioni" };
+const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni" };
+function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : TITLES[tab]; }
+function rerender(){
+  if (tab === "vHome") renderHome(); else if (tab === "vSubs") renderSubs();
+  else if (tab === "vSearch") renderSearch();
+}
 function go(t){
+  if (t === "vHome" && !S.opt.showHome) t = "vSubs";
   tab = t;
   document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== t);
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === t));
+  $("#navHome").hidden = !S.opt.showHome;
   $("#hTitle").textContent = TITLES[t];
-  $("#btnSearch").hidden = $("#btnRefresh").hidden = t !== "vFeed";
-  if (t !== "vFeed") { $("#search").hidden = true; $("#main").classList.remove("searching"); }
+  $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs");
+  if (t === "vHome") { renderHome(); if (S.key && Date.now() - S.homeFetch > 30 * 60000) loadHome(); }
+  if (t === "vSubs") { renderSubs(); if (Date.now() - S.lastFetch > 20 * 60000) refresh(); }
+  if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
   if (t === "vSettings") renderSettings();
-  if (t === "vFeed") renderFeed();
   window.scrollTo(0, 0);
 }
 
@@ -505,24 +727,27 @@ async function addChannels(ids, label){
   const info = await channelInfo(fresh);
   S.channels.push(...info.map(c => ({ ...c, manual: true }))); save();
   renderChannels(`Aggiunti ${info.length} canali.`);
-  S.lastFetch = 0; refresh();
+  S.lastFetch = 0;
 }
 
 let resetArmed = false;
-document.addEventListener("click", async e => {
-  const t = e.target.closest("[data-tab],[data-v],[data-go],[data-act],[data-del]"); if (!t) return;
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies]"); if (!t) return;
   if (t.dataset.tab) return go(t.dataset.tab);
-  if (t.dataset.go) return go(t.dataset.go);
+  if (t.dataset.go) { closeSheets(); return go(t.dataset.go); }
   if (t.dataset.v) return openVideo(t.dataset.v);
+  if (t.dataset.replies) return loadReplies(t.dataset.replies);
   if (t.dataset.del) {
     S.channels = S.channels.filter(c => c.id !== t.dataset.del);
-    S.videos = S.videos.filter(v => v.ch !== t.dataset.del); save(); return renderChannels("Canale rimosso.");
+    S.videos = S.videos.filter(v => v.ch !== t.dataset.del); save(); updateBell(); return renderChannels("Canale rimosso.");
   }
   const a = t.dataset.act;
   if (a === "refresh") refresh(true);
-  if (a === "login") startLogin();
+  if (a === "home") loadHome(true);
+  if (a === "login") startLogin({ do: "sync" });
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
+  if (a === "moreComments") loadComments(false);
   if (a === "desc") { $("#pDesc").classList.add("full"); t.remove(); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
@@ -533,21 +758,24 @@ document.addEventListener("click", async e => {
 
 document.addEventListener("submit", async e => {
   e.preventDefault();
-  if (e.target.id === "keyForm") {
+  const id = e.target.id;
+  if (id === "sForm") { $("#sIn").blur(); return doSearch($("#sIn").value); }
+  if (id === "cForm") { const txt = $("#cIn").value.trim(); if (txt && current) postComment(current, txt); return; }
+  if (id === "keyForm") {
     const k = $("#keyIn").value.replace(/[\s"'`]/g, ""); if (!k) return;
-    if (!/^AIza[\w-]{35}$/.test(k)) { toast(`La chiave deve iniziare con AIza ed essere lunga 39 caratteri: questa ne ha ${k.length}. Copiala di nuovo col tasto copia della console.`); return; }
+    if (!/^AIza[\w-]{35}$/.test(k)) { toast(`La chiave deve iniziare con AIza ed essere lunga 39 caratteri: questa ne ha ${k.length}.`); return; }
     S.key = k; save();
-    try { await api("channels", { part: "id", forHandle: "@YouTube" }); toast("Chiave salvata e funzionante"); renderSettings(); if (!S.channels.length) go("vChannels"); else refresh(); }
+    try { await api("channels", { part: "id", forHandle: "@YouTube" }); toast("Chiave salvata e funzionante"); renderSettings(); }
     catch (err) { toast("La chiave non funziona: " + err.message); renderSettings(); }
   }
-  if (e.target.id === "clientForm") {
+  if (id === "clientForm") {
     const c = $("#clientIn").value.replace(/\s/g, ""); if (!c) return;
     if (!/\.apps\.googleusercontent\.com$/.test(c)) { toast("L'ID client deve finire con .apps.googleusercontent.com"); return; }
-    S.clientId = c; S.token = ""; save(); toast("ID client salvato"); renderSettings(); return;
+    S.clientId = c; S.token = ""; save(); toast("ID client salvato"); renderSettings();
   }
-  if (e.target.id === "addForm") {
+  if (id === "addForm") {
     const v = $("#addIn").value; if (!v.trim()) return;
-    try { const id = await resolveChannel(v); await addChannels([id], "Cerco il canale…"); }
+    try { const cid = await resolveChannel(v); await addChannels([cid], "Cerco il canale…"); }
     catch (err) { renderChannels(err.message, true); }
   }
 });
@@ -555,7 +783,12 @@ document.addEventListener("submit", async e => {
 document.addEventListener("change", e => {
   const id = e.target.id;
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
+  if (id === "o_home") { S.opt.showHome = e.target.checked; save(); $("#navHome").hidden = !S.opt.showHome; }
+  if (id === "o_region") { S.opt.region = e.target.value; S.homeFetch = 0; save(); }
   if (id === "o_n") { S.opt.perChannel = +e.target.value; S.lastFetch = 0; save(); renderSettings(); }
+});
+document.addEventListener("input", e => {
+  if (e.target.id === "cIn") { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }
 });
 
 $("#csvFile").addEventListener("change", async e => {
@@ -566,20 +799,26 @@ $("#csvFile").addEventListener("change", async e => {
   catch (err) { renderChannels(err.message, true); }
 });
 
-$("#btnRefresh").onclick = () => refresh(true);
-$("#btnSearch").onclick = () => {
-  const s = $("#search"); s.hidden = !s.hidden; $("#main").classList.toggle("searching", !s.hidden);
-  if (!s.hidden) $("#q").focus(); else { query = ""; $("#q").value = ""; renderFeed(); }
-};
-$("#q").addEventListener("input", e => { query = e.target.value; renderFeed(); });
-$("#pClose").onclick = closeVideo;
+$("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : refresh(true);
+$("#btnSearch").onclick = () => go("vSearch");
+$("#btnBell").onclick = openNotifs;
+$("#pClose").onclick = closeSheets;
+$("#nClose").onclick = closeSheets;
 
-const justLoggedIn = readLoginReturn();
-go(justLoggedIn ? "vChannels" : "vFeed");
-if (justLoggedIn) syncSubs();
-else if (Date.now() - S.lastFetch > 20 * 60 * 1000) refresh();
+/* ---------- avvio ---------- */
+const after = readLoginReturn();
+if (after?.do === "comment") {
+  let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
+  go(after.tab || "vSubs");
+  if (v) { CACHE.set(v.id, v); openVideo(v.id); postComment(v, after.text); }
+} else if (after) { go("vChannels"); syncSubs(); }
+else go(S.opt.showHome ? "vHome" : "vSubs");
+updateBell();
+if (!after && S.channels.length && Date.now() - S.lastFetch > 20 * 60000 && tab !== "vSubs") refresh();
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && Date.now() - S.lastFetch > 20 * 60 * 1000) refresh();
+  if (document.hidden) return;
+  if (Date.now() - S.lastFetch > 20 * 60000) refresh();
+  if (tab === "vHome" && Date.now() - S.homeFetch > 30 * 60000) loadHome();
 });
 </script>
 </body>
