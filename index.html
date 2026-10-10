@@ -12,15 +12,15 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* App a colonna singola: barra in alto, contenuto, tab bar fissata al fondo. Palette calda in stile Claude. */
 :root{
   --bg:#f3f1ea; --surface:#e9e6dc; --raised:#dfdbcf; --line:#d6d1c4;
   --fg:#141413; --muted:#65635c; --accent:#b8583a; --on-accent:#fff; --danger:#a53f2a;
   --glass:rgba(243,241,234,.92);
-  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  --font:Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  --serif:var(--font);
   --top:env(safe-area-inset-top,0px); --bot:env(safe-area-inset-bottom,0px);
   --nav-h:58px;
 }
@@ -40,7 +40,7 @@ a{color:var(--accent)}
 header{position:fixed;top:0;left:0;right:0;z-index:20;background:var(--glass);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:calc(var(--top) + 6px) 8px 6px 16px;
   display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line)}
-header h1{font:600 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
+header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
 header h1 i{width:10px;height:10px;border-radius:3px;background:var(--accent);flex:none;transform:rotate(45deg)}
 .icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
 .icon-btn:active{background:var(--raised)}
@@ -79,7 +79,7 @@ nav button[aria-current="true"] svg{stroke:var(--accent)}
 .sub{color:var(--muted);font-size:13px;margin-top:3px}
 
 .empty{padding:48px 24px;text-align:center;color:var(--muted)}
-.empty h2{color:var(--fg);font:600 21px/1.25 var(--serif);margin:0 0 8px}
+.empty h2{color:var(--fg);font:700 21px/1.25 var(--serif);margin:0 0 8px}
 .btn{border:0;border-radius:10px;padding:10px 18px;background:var(--accent);color:var(--on-accent);font-weight:600;text-decoration:none;display:inline-block}
 .btn.ghost{background:var(--raised);color:var(--fg)}
 .btn:disabled{opacity:.5}
@@ -112,11 +112,11 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   padding-top:var(--top);padding-bottom:calc(var(--bot) + 24px);transform:translateY(100%);transition:transform .28s ease;visibility:hidden}
 .sheet.open{transform:none;visibility:visible}
 .pbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--bg)}
-.pbar h3{flex:1;margin:0;font:600 19px var(--serif)}
+.pbar h3{flex:1;margin:0;font:700 19px var(--serif)}
 .frame{aspect-ratio:16/9;background:#000;width:100%;max-width:100%}
 .frame iframe{width:100%;height:100%;border:0;display:block}
 .pinfo{padding:14px 16px}
-.pinfo h2{font:600 20px/1.3 var(--serif);margin:0 0 8px;text-wrap:balance}
+.pinfo h2{font:700 20px/1.3 var(--serif);margin:0 0 8px;text-wrap:balance}
 .chan{display:flex;align-items:center;gap:10px;margin:10px 0;font-size:13px}
 .chan .avatar{width:28px;height:28px}
 #pInfo>.sub{font-size:12px}
@@ -124,7 +124,33 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .desc.full{max-height:none}
 .more{border:0;background:none;color:var(--accent);padding:6px 0;font-size:12.5px;font-weight:600}
 
-.comments h3{font:600 15px var(--serif);margin:16px 0 10px}
+.vt{font:700 18px/1.3 var(--font);margin:0;text-wrap:pretty;overflow-wrap:anywhere}
+.vmeta{font-size:12.5px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}
+.vmeta b{color:var(--fg);font-weight:500}
+.vmeta .more{padding:0;font-size:12.5px;color:var(--fg)}
+.vact{display:flex;align-items:center;gap:10px;margin:14px 0}
+.vact .avatar{width:36px;height:36px}
+.pill{border:0;border-radius:999px;padding:8px 16px;font-size:13.5px;font-weight:500;background:var(--fg);color:var(--bg);flex:none}
+.pill.on{background:var(--raised);color:var(--fg)}
+.vact .sp{flex:1}
+.rbtn{width:40px;height:40px;border:0;border-radius:50%;background:none;display:grid;place-items:center;color:var(--fg);flex:none}
+.rbtn:active{background:var(--raised)}
+.rbtn svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rbtn.on svg{fill:currentColor;stroke:var(--bg)}
+.vdesc{background:var(--surface);border-radius:12px;padding:12px;font-size:13px;margin-bottom:12px}
+.vdesc .d{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:8px;line-height:1.45}
+.ccard{display:block;width:100%;text-align:left;border:0;background:var(--surface);border-radius:12px;padding:12px;margin-bottom:6px}
+.ccard .h{font-size:14px;font-weight:500}
+.ccard .h span{color:var(--muted);font-weight:400;margin-left:6px}
+.ccard .pv{display:flex;gap:10px;align-items:center;margin-top:8px;font-size:13px}
+.ccard .pv img{width:24px;height:24px;border-radius:50%;flex:none;background:var(--raised)}
+.ccard .pv div{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#player .card .meta,#player .group{padding-left:0;padding-right:0}
+.menu{position:fixed;left:8px;right:8px;bottom:calc(var(--bot) + 8px);z-index:200;background:var(--surface);border-radius:16px;padding:6px;box-shadow:0 10px 40px rgba(0,0,0,.4)}
+.menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:13px 14px;border-radius:10px;font-size:15px}
+.menu button:active{background:var(--raised)}
+.scrim{position:fixed;inset:0;z-index:199;background:rgba(0,0,0,.35)}
+.comments h3{font:700 15px var(--serif);margin:16px 0 10px}
 .cform{display:flex;gap:8px;align-items:flex-end;margin-bottom:10px}
 .cform .btn{padding:8px 14px;font-size:13px}
 .cform textarea{flex:1;min-width:0;resize:none;min-height:36px;max-height:120px;padding:8px 11px;font-size:13px;border-radius:10px;border:1px solid var(--line);background:var(--surface);outline:none}
@@ -145,7 +171,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .banner{aspect-ratio:6/1;background:var(--surface) center/cover no-repeat;max-width:100%}
 .chead{display:flex;gap:14px;align-items:center;padding:14px 16px 6px}
 .chead img{width:64px;height:64px;border-radius:50%;object-fit:cover;background:var(--raised);flex:none}
-.chead h2{font:600 19px/1.25 var(--serif);margin:0;overflow-wrap:anywhere}
+.chead h2{font:700 19px/1.25 var(--serif);margin:0;overflow-wrap:anywhere}
 .chead .sub{font-size:12px}
 .cabout{padding:0 16px;color:var(--muted);font-size:12.5px;line-height:1.45;white-space:pre-wrap;overflow:hidden;max-height:3em;overflow-wrap:anywhere}
 .cabout.full{max-height:none}
@@ -204,6 +230,19 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   </div>
   <div class="frame" id="pFrame"></div>
   <div class="pinfo" id="pInfo"></div>
+</div>
+
+<div class="sheet" id="cmts" aria-hidden="true">
+  <div class="pbar">
+    <h3 id="cmTitle" style="font-size:17px;padding-left:8px">Commenti</h3>
+    <button class="icon-btn" data-close="#cmts" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div style="padding:0 16px" class="comments">
+    <form class="cform" id="cForm"><textarea id="cIn" rows="1" placeholder="Aggiungi un commento…"></textarea>
+      <button class="btn" type="submit">Invia</button></form>
+    <div id="cList"></div>
+    <button class="more" id="cMore" data-act="moreComments" hidden>Carica altri commenti</button>
+  </div>
 </div>
 
 <div class="sheet" id="chan" aria-hidden="true">
@@ -376,7 +415,7 @@ function toVideo(v){
   const t = v.snippet.thumbnails || {}, d = secs(v.contentDetails?.duration);
   return { id: v.id, title: v.snippet.title, ch: v.snippet.channelId, chTitle: v.snippet.channelTitle,
     at: v.snippet.publishedAt, dur: d, live: v.snippet.liveBroadcastContent === "live",
-    views: +v.statistics?.viewCount || 0,
+    views: +v.statistics?.viewCount || 0, likes: +v.statistics?.likeCount || 0, comments: +v.statistics?.commentCount || 0,
     thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "",
     desc: (v.snippet.description || "").slice(0, 3000), cat: v.snippet.categoryId || "",
     tags: (v.snippet.tags || []).slice(0, 12).map(t => t.toLowerCase()) };
@@ -742,33 +781,111 @@ function closeSheets(){
   setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
 }
 
+const ICON = {
+  like: '<svg viewBox="0 0 24 24"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg>',
+  dislike: '<svg viewBox="0 0 24 24"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1zm0 0-4 7a2.5 2.5 0 0 1-2.6-3L11 14H5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.2 3H17"/></svg>',
+  share: '<svg viewBox="0 0 24 24"><path d="M14 5l7 7-7 7v-4c-5 0-8.5 1.5-11 5 1-5 4-10 11-11z"/></svg>',
+  dots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>'
+};
+const num = n => !n ? "0" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln" : n >= 1e3 ? (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(".0","").replace(".",",") + "K" : String(n);
+let myRating = "none";
+
 function openVideo(id){
   const x = CACHE.get(id); if (!x) return;
-  $("#notifs").classList.remove("open");
-  current = x; S.watched[id] = Date.now();
+  $("#notifs").classList.remove("open"); closeSheet("#cmts");
+  current = x; myRating = "none"; S.watched[id] = Date.now();
   S.hist = [{ cat: x.cat, ch: x.ch, tags: x.tags || [] }].concat(S.hist.filter((_, i) => i < 149)); save();
   startPlayer(id);
   $("#pExt").href = "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
-  const more = S.videos.filter(v => v.ch === x.ch && v.id !== id).slice(0, 5);
-  $("#pInfo").innerHTML = `<h2>${esc(x.title)}</h2>
-    <div class="sub">${[x.views ? views(x.views) : "", ago(x.at), x.dur ? fmtDur(x.dur) : ""].filter(Boolean).join(" · ")}</div>
-    <div class="chan"><img class="avatar" src="${esc(avatarOf(x.ch))}" alt="" data-ch="${x.ch}"><b style="flex:1;min-width:0" data-ch="${x.ch}">${esc(x.chTitle)} ›</b>
-      ${S.channels.some(c => c.id === x.ch) ? "" : `<button class="btn ghost" data-act="block" style="padding:7px 12px;font-size:13px">Non mi interessa</button>`}</div>
-    ${x.desc ? `<div class="desc" id="pDesc">${esc(x.desc)}</div><button class="more" data-act="desc">Mostra tutto</button>` : ""}
-    <div class="comments">
-      <h3>Commenti</h3>
-      <form class="cform" id="cForm"><textarea id="cIn" rows="1" placeholder="${S.clientId ? "Aggiungi un commento…" : "Configura l'accesso Google per commentare"}" ${S.clientId ? "" : "disabled"}></textarea>
-        <button class="btn" type="submit" ${S.clientId ? "" : "disabled"}>Invia</button></form>
-      <div id="cList"><div class="status">Carico i commenti…</div></div>
-      <button class="more" id="cMore" data-act="moreComments" hidden>Carica altri commenti</button>
-    </div>
-    ${more.length ? `<div class="group" style="padding-left:0">Altri video di ${esc(x.chTitle)}</div>` + more.map(m => `
-      <button class="card" data-v="${m.id}" style="display:flex;gap:10px;padding-bottom:12px">
-        <div class="thumb" style="width:42%;flex:none;border-radius:8px"><img loading="lazy" src="${esc(m.thumb)}" alt="">${m.dur ? `<span class="dur">${fmtDur(m.dur)}</span>` : ""}</div>
-        <div style="min-width:0"><div class="title" style="font-size:14px">${esc(m.title)}</div><div class="sub">${ago(m.at)}</div></div></button>`).join("") : ""}`;
+  renderWatch();
+  $("#cIn").placeholder = S.clientId ? "Aggiungi un commento…" : "Configura l'accesso Google per commentare";
+  $("#cIn").disabled = $("#cForm button").disabled = !S.clientId;
   openSheet("#player");
   cPage = ""; loadComments(true);
+  refreshStats(id);
+  if (tokenOk()) apiAuth("videos/getRating", { id }).then(j => { if (current?.id === id) { myRating = j.items?.[0]?.rating || "none"; paintRating(); } }).catch(() => {});
   rerender();
+}
+
+function renderWatch(){
+  const x = current;
+  const pool2 = [...S.videos.filter(v => v.ch === x.ch), ...S.home, ...S.videos].filter(v => v.id !== x.id);
+  const seenIds = new Set(), related = pool2.filter(v => !seenIds.has(v.id) && seenIds.add(v.id)).slice(0, 12);
+  $("#pInfo").innerHTML = `
+    <h2 class="vt">${esc(x.title)}</h2>
+    <div class="vmeta"><b data-ch="${x.ch}">${esc(x.chTitle)}</b>
+      <span id="vLikes">${x.likes ? num(x.likes) + " Mi piace" : ""}</span>
+      <span>${x.views ? views(x.views) : ""}</span><span>${ago(x.at)}</span>
+      <button class="more" data-act="desc">…altro</button></div>
+    <div class="vdesc" id="vDesc" hidden><b>${x.views ? x.views.toLocaleString("it-IT") + " visualizzazioni" : ""}</b> · ${new Date(x.at).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
+      <div class="d">${esc(x.desc || "Nessuna descrizione.")}</div></div>
+    <div class="vact">
+      <img class="avatar" src="${esc(avatarOf(x.ch))}" alt="" data-ch="${x.ch}">
+      <button class="pill${isSub(x.ch) ? " on" : ""}" id="vSub" data-act="vsub">${isSub(x.ch) ? "Iscritto" : "Iscriviti"}</button>
+      <span class="sp"></span>
+      <button class="rbtn" id="rLike" data-act="like" aria-label="Mi piace">${ICON.like}</button>
+      <button class="rbtn" id="rDislike" data-act="dislike" aria-label="Non mi piace">${ICON.dislike}</button>
+      <button class="rbtn" data-act="share" aria-label="Condividi">${ICON.share}</button>
+      <button class="rbtn" data-act="vmenu" aria-label="Altro">${ICON.dots}</button>
+    </div>
+    <button class="ccard" data-act="openComments">
+      <div class="h">Commenti<span id="cCount">${x.comments ? num(x.comments) : ""}</span></div>
+      <div class="pv" id="cPrev"><div class="sub">Carico…</div></div>
+    </button>
+    ${related.length ? `<div class="group">Altri video</div>` + related.map(card).join("") : ""}`;
+  paintRating();
+}
+
+function paintRating(){
+  $("#rLike")?.classList.toggle("on", myRating === "like");
+  $("#rDislike")?.classList.toggle("on", myRating === "dislike");
+}
+
+async function refreshStats(id){
+  try {
+    const j = await api("videos", { part: "statistics", id });
+    const st = j.items?.[0]?.statistics; if (!st || current?.id !== id) return;
+    Object.assign(current, { likes: +st.likeCount || 0, comments: +st.commentCount || 0, views: +st.viewCount || current.views });
+    const l = $("#vLikes"); if (l) l.textContent = current.likes ? num(current.likes) + " Mi piace" : "";
+    const c = $("#cCount"); if (c) c.textContent = current.comments ? num(current.comments) : "";
+  } catch {}
+}
+
+async function rate(kind){
+  const video = current; if (!video) return;
+  const next = myRating === kind ? "none" : kind;
+  if (!tokenOk()) {
+    try { sessionStorage.setItem("ytg.video", JSON.stringify(video)); } catch {}
+    return startLogin({ do: "rate", rating: next, video: video.id, tab });
+  }
+  const prev = myRating; myRating = next; paintRating();
+  if (prev === "like" && next !== "like") video.likes = Math.max(0, (video.likes || 1) - 1);
+  if (next === "like") video.likes = (video.likes || 0) + 1;
+  const l = $("#vLikes"); if (l) l.textContent = video.likes ? num(video.likes) + " Mi piace" : "";
+  try {
+    const r = await fetch(API + "videos/rate?" + new URLSearchParams({ id: video.id, rating: next }), { method: "POST", headers: { Authorization: "Bearer " + S.token } });
+    if (r.status === 401) { S.token = ""; save(); myRating = prev; paintRating(); return rate(kind); }
+    if (!r.ok) throw new Error("Errore " + r.status);
+    if (next === "like") { S.likes = [{ cat: video.cat, ch: video.ch, tags: video.tags || [] }].concat(S.likes).slice(0, 80); save(); }
+  } catch (e) { myRating = prev; paintRating(); toast("Non riuscito: " + e.message); }
+}
+
+async function shareVideo(){
+  const url = "https://youtu.be/" + current.id;
+  try { if (navigator.share) { await navigator.share({ title: current.title, url }); return; } } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url); toast("Link copiato"); } catch { toast(url); }
+}
+
+function showMenu(items){
+  closeMenu();
+  document.body.insertAdjacentHTML("beforeend", `<div class="scrim" data-act="closeMenu"></div><div class="menu">${items.map(([a, label]) => `<button data-act="${a}">${label}</button>`).join("")}</div>`);
+}
+function closeMenu(){ document.querySelectorAll(".menu,.scrim").forEach(n => n.remove()); }
+function videoMenu(){
+  const items = [["copyLink", "Copia link"], ["openYT", "Apri nel browser"]];
+  if (!isSub(current.ch)) items.push(["block", "Non mi interessa questo canale"]);
+  items.push(["closeMenu", "Annulla"]);
+  showMenu(items);
 }
 
 function commentHTML(c, replies){
@@ -790,12 +907,17 @@ async function loadComments(first){
       const rep = n ? `<div class="replies" id="r_${t.id}"><button class="more" data-replies="${t.id}">Mostra ${n} rispost${n === 1 ? "a" : "e"}</button></div>` : "";
       return commentHTML(top, rep);
     }).join("");
-    if (first) list.innerHTML = html || `<div class="status">Ancora nessun commento.</div>`;
+    if (first) {
+      list.innerHTML = html || `<div class="status">Ancora nessun commento.</div>`;
+      const top = j.items?.[0]?.snippet?.topLevelComment?.snippet;
+      $("#cPrev").innerHTML = top ? `<img src="${esc(top.authorProfileImageUrl)}" alt=""><div>${esc(top.textOriginal ?? top.textDisplay)}</div>` : `<div class="sub">Ancora nessun commento. Scrivi il primo.</div>`;
+    }
     else list.insertAdjacentHTML("beforeend", html);
     cPage = j.nextPageToken || ""; moreBtn.hidden = !cPage;
   } catch (e) {
     if (current?.id !== vid) return;
-    list.innerHTML = `<div class="status">${e.reason === "commentsDisabled" ? "I commenti sono disattivati per questo video." : "Commenti non disponibili: " + esc(errMsg(e))}</div>`;
+    const msg = e.reason === "commentsDisabled" ? "I commenti sono disattivati per questo video." : "Commenti non disponibili: " + esc(errMsg(e));
+    list.innerHTML = `<div class="status">${msg}</div>`; $("#cPrev").innerHTML = `<div class="sub">${msg}</div>`;
     moreBtn.hidden = true;
   }
 }
@@ -919,7 +1041,7 @@ async function chanTab(tabName){
 async function openPlaylist(plId, title){
   const list = $("#chList");
   list.innerHTML = `<div style="padding:8px 16px"><button class="more" data-ctab="playlists">‹ Tutte le playlist</button>
-    <div style="font:600 15px var(--serif);margin-top:4px">${esc(title)}</div></div><div id="plItems" class="status" style="padding:8px 16px">Carico…</div>`;
+    <div style="font:700 15px var(--serif);margin-top:4px">${esc(title)}</div></div><div id="plItems" class="status" style="padding:8px 16px">Carico…</div>`;
   try {
     const j = await api("playlistItems", { part: "contentDetails", playlistId: plId, maxResults: 50 });
     const ids = (j.items || []).map(i => i.contentDetails.videoId);
@@ -932,34 +1054,38 @@ async function openPlaylist(plId, title){
 }
 
 /* Iscriviti / annulla iscrizione sul tuo account YouTube (50 unità) */
-async function toggleSub(){
-  const id = CH.id, info = CH.info;
+async function toggleSub(id, title, thumb){
+  id = id || CH.id; title = title || CH.info?.snippet?.title || ""; thumb = thumb || CH.info?.snippet?.thumbnails?.default?.url || "";
   if (!tokenOk()) {
     try { sessionStorage.setItem("ytg.video", current ? JSON.stringify(current) : ""); } catch {}
-    return startLogin({ do: "channel", ch: id, tab });
+    return startLogin({ do: "sub", ch: id, title, thumb, video: current?.id || "", tab });
   }
-  const btn = $("#subBtn"); btn.disabled = true;
+  const btns = [$("#subBtn"), $("#vSub")].filter(Boolean); btns.forEach(b => b.disabled = true);
   try {
     if (isSub(id)) {
       const j = await apiAuth("subscriptions", { part: "id", mine: "true", forChannelId: id });
       const sid = j.items?.[0]?.id;
       if (sid) {
         const r = await fetch(API + "subscriptions?id=" + encodeURIComponent(sid), { method: "DELETE", headers: { Authorization: "Bearer " + S.token } });
+        if (r.status === 401) { const e = new Error("Sessione scaduta"); e.relogin = true; throw e; }
         if (!r.ok && r.status !== 404) throw new Error("Errore " + r.status);
       }
       S.channels = S.channels.filter(c => c.id !== id); S.videos = S.videos.filter(v => v.ch !== id);
       toast("Iscrizione annullata");
     } else {
       await apiAuth("subscriptions", { part: "snippet" }, { snippet: { resourceId: { kind: "youtube#channel", channelId: id } } });
-      S.channels.push({ id, title: info.snippet.title, thumb: info.snippet.thumbnails?.default?.url || "" });
-      S.lastFetch = 0; toast("Iscritto a " + info.snippet.title);
+      S.channels.push({ id, title, thumb }); S.lastFetch = 0; toast("Iscritto a " + title);
     }
-    save(); updateBell(); rerender();
-    btn.textContent = isSub(id) ? "Iscritto ✓" : "Iscriviti"; btn.classList.toggle("ghost", isSub(id));
+    save(); updateBell(); rerender(); paintSub(id);
   } catch (e) {
-    if (e.relogin || e.reason === "insufficientPermissions") { S.token = ""; save(); return toggleSub(); }
+    if (e.relogin || e.reason === "insufficientPermissions") { S.token = ""; save(); return toggleSub(id, title, thumb); }
     toast("Operazione non riuscita: " + errMsg(e));
-  } finally { btn.disabled = false; }
+  } finally { btns.forEach(b => b.disabled = false); }
+}
+function paintSub(id){
+  const on = isSub(id);
+  const a = $("#subBtn"); if (a && CH?.id === id) { a.textContent = on ? "Iscritto ✓" : "Iscriviti"; a.classList.toggle("ghost", on); }
+  const b = $("#vSub"); if (b && current?.ch === id) { b.textContent = on ? "Iscritto" : "Iscriviti"; b.classList.toggle("on", on); }
 }
 
 /* ---------- navigazione ---------- */
@@ -1021,12 +1147,21 @@ document.addEventListener("click", e => {
   if (a === "chMore") loadChanVideos(false);
   if (a === "chAbout") { $("#cAbout").classList.add("full"); t.remove(); }
   if (a === "subscribe") toggleSub();
+  if (a === "vsub" && current) toggleSub(current.ch, current.chTitle, avatarOf(current.ch));
+  if (a === "like") rate("like");
+  if (a === "dislike") rate("dislike");
+  if (a === "share") shareVideo();
+  if (a === "vmenu") videoMenu();
+  if (a === "closeMenu") closeMenu();
+  if (a === "copyLink") { closeMenu(); navigator.clipboard?.writeText("https://youtu.be/" + current.id).then(() => toast("Link copiato"), () => toast("https://youtu.be/" + current.id)); }
+  if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
+  if (a === "openComments") { $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : ""); openSheet("#cmts"); }
   if (a === "unmute") { try { yp.unMute(); yp.setVolume(100); yp.playVideo(); } catch {} t.remove(); }
   if (a === "block" && current) {
     S.blocked[current.ch] = 1; S.home = S.home.filter(v => v.ch !== current.ch); save();
-    t.remove(); toast(`Non vedrai più ${current.chTitle} nella Home`); rerender();
+    closeMenu(); toast(`Non vedrai più ${current.chTitle} nella Home`); rerender();
   }
-  if (a === "desc") { $("#pDesc").classList.add("full"); t.remove(); }
+  if (a === "desc") { const d = $("#vDesc"); d.hidden = !d.hidden; t.textContent = d.hidden ? "…altro" : "meno"; }
   if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
@@ -1090,8 +1225,12 @@ if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
   go(after.tab || "vSubs");
   if (v) { CACHE.set(v.id, v); openVideo(v.id); postComment(v, after.text); }
-} else if (after?.do === "channel") {
-  go(after.tab || "vSubs"); openChannel(after.ch).then(() => setTimeout(toggleSub, 400));
+} else if (after?.do === "sub" || after?.do === "rate") {
+  let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video") || "null"); } catch {}
+  go(after.tab || "vSubs");
+  if (v) { CACHE.set(v.id, v); openVideo(v.id); }
+  if (after.do === "sub") setTimeout(() => toggleSub(after.ch, after.title, after.thumb), 500);
+  else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
 } else if (after) { go("vChannels"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell();
