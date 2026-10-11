@@ -555,6 +555,7 @@ async function syncSubs(){
     S.videos = S.videos.filter(v => S.channels.some(c => c.id === v.ch));
     try {
       const lk = await apiAuth("videos", { part: "snippet", myRating: "like", maxResults: 50 });
+      S.likedIds = (lk.items || []).map(v => v.id);
       S.likes = (lk.items || []).map(v => ({ cat: v.snippet.categoryId, ch: v.snippet.channelId,
         tags: (v.snippet.tags || []).slice(0, 12).map(t => t.toLowerCase()) }));
     } catch {}
@@ -585,16 +586,10 @@ async function resolveChannel(input){
   if (!j.items?.length) throw new Error("Canale non trovato: " + input);
   return j.items[0].id;
 }
-const avatarOf = id => S.channels.find(c => c.id === id)?.thumb || S.avatars[id] || "";
-async function ensureAvatars(list){
-  const miss = [...new Set(list.map(v => v.ch))].filter(id => !avatarOf(id));
-  if (!miss.length || !S.key) return;
-  try {
-    (await channelInfo(miss.slice(0, 150))).forEach(c => S.avatars[c.id] = c.thumb);
-    const keys = Object.keys(S.avatars); if (keys.length > 600) keys.slice(0, keys.length - 600).forEach(k => delete S.avatars[k]);
-    save(); rerender(); if ($("#player").classList.contains("open")) renderRelated();
-  } catch {}
-}
+/* Foto dei canali: quella delle iscrizioni o dei canali già aperti; per gli altri l'iniziale, senza spendere unità */
+const letterAvatar = name => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="20" fill="#3a3a37"/><text x="20" y="26" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#d9d7d1" text-anchor="middle">${esc((name || "?").trim().charAt(0).toUpperCase() || "?")}</text></svg>`);
+const avatarOf = (id, name) => S.channels.find(c => c.id === id)?.thumb || S.avatars[id] || letterAvatar(name);
+function ensureAvatars(){ /* volutamente vuota: le foto dei canali non iscritti non vengono più scaricate */ }
 
 /* ---------- video ---------- */
 function secs(iso){
@@ -668,7 +663,13 @@ async function refresh(manual, full){
     // 1) quanti video ha ogni canale
     $("#hTitle").textContent = tab === "vSubs" ? "Controllo i canali…" : LABEL(tab);
     const ids = S.channels.map(c => c.id), batches = [], counts = {};
-    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+    // i canali che non pubblicano da più di 60 giorni si controllano una volta al giorno
+    const last = {}; for (const v of S.videos) if (!last[v.ch] || v.at > last[v.ch]) last[v.ch] = v.at;
+    const daily = full || now - (S.inactiveCheck || 0) > 24 * 3600000;
+    const active = id => !meta[id] || (last[id] && now - Date.parse(last[id]) < 60 * 864e5);
+    const checkIds = daily ? ids : ids.filter(active);
+    for (let i = 0; i < checkIds.length; i += 50) batches.push(checkIds.slice(i, i + 50));
+    if (daily) S.inactiveCheck = now;
     const pages = await pool(batches, 4, b => api("channels", { part: "statistics", id: b.join(","), maxResults: 50 }));
     const firstErr = pages.find(p => p?.error)?.error;
     if (firstErr && pages.every(p => p?.error)) throw firstErr;
@@ -684,7 +685,7 @@ async function refresh(manual, full){
       // i video di questo canale dovrebbero esserci ma non ci sono (memoria persa o salvataggio fallito): li riscarico
       if (!have.has(c.id) && (m.ids || []).some(x => !(m.sk || []).includes(x))) return true;
       if (c.id in counts && counts[c.id] !== m.n) return true;
-      return m.up && now - m.at > 2 * 3600000;                 // c'era una première in arrivo
+      return m.up && now - m.at > 6 * 3600000;                 // c'era una première in arrivo
     });
     const inChanged = new Set(changed.map(c => c.id));
     // Il contatore dei video di YouTube a volte si aggiorna in ritardo: per questo ricontrollo direttamente
@@ -697,10 +698,10 @@ async function refresh(manual, full){
       const gaps = d.slice(0, 6).map((t, i, a) => i ? a[i - 1] - t : 0).slice(1).sort((a, b) => a - b);
       return Math.min(14 * 864e5, Math.max(2 * 3600000, gaps[Math.floor(gaps.length / 2)]));
     };
-    const due = c => (now - meta[c.id].at) / (gap(c.id) * (full ? 0 : 0.5) || 1);
+    const due = c => (now - meta[c.id].at) / (gap(c.id) || 1);
     const sweep = full ? S.channels.filter(c => !inChanged.has(c.id))
       : S.channels.filter(c => meta[c.id] && !inChanged.has(c.id)).map(c => [due(c), c]).filter(x => x[0] >= 1)
-          .sort((a, b) => b[0] - a[0]).slice(0, 15).map(x => x[1]);
+          .sort((a, b) => b[0] - a[0]).slice(0, 5).map(x => x[1]);
     const todo = changed.concat(sweep);
     let done = 0; progress(0, todo.length);
     const res = await pool(todo, 8, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
@@ -764,13 +765,13 @@ async function chartPage(c, idx, force){
   if (idx && !T[idx]) { try { await chartPage(c, idx - 1, true); } catch {} }   // serve il "segnalibro" della pagina prima
   if (idx && !T[idx]) idx = 0;
   const ck = key + ":" + idx, rc = S.relCache;
-  if (!force && rc[ck] && Date.now() - rc[ck].at < 3 * 3600000) return remember(rc[ck].list);
+  if (!force && rc[ck] && Date.now() - rc[ck].at < 12 * 3600000) return remember(rc[ck].list);
   const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50,
     ...(c ? { videoCategoryId: c } : {}), ...(idx ? { pageToken: T[idx] } : {}) });
   if (j.nextPageToken) T[idx + 1] = j.nextPageToken;
   const list = remember((j.items || []).filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo));
   rc[ck] = { at: Date.now(), list };
-  for (const k of Object.keys(rc)) if (Date.now() - rc[k].at > 24 * 3600000) delete rc[k];
+  for (const k of Object.keys(rc)) if (Date.now() - rc[k].at > 48 * 3600000) delete rc[k];
   save(); return list;
 }
 const catChart = (c, force) => chartPage(c, 0, force);
@@ -812,7 +813,7 @@ function profile(){
 }
 function interests(){
   const p = profile(), top = o => Object.entries(o).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).map(x => x[0]);
-  return { cats: top(p.cat).slice(0, 4), tags: top(p.tag).filter(t => p.tag[t] >= 2).slice(0, 4), p };
+  return { cats: top(p.cat).slice(0, 3), tags: top(p.tag).filter(t => p.tag[t] >= 2).slice(0, 4), p };
 }
 function interleave(lists){
   const out = [], seen = new Set(); let i = 0, more = true;
@@ -823,12 +824,19 @@ function interleave(lists){
 function favChannels(p){
   return Object.entries(p.ch).filter(([id, w]) => w >= 2 && !isSub(id) && !S.blocked[id]).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8);
 }
+/* Video costruiti dalla playlist stessa: 1 unità invece di 2 (manca solo la durata) */
+function fromPlaylistItem(it){
+  const s = it.snippet || {}, t = s.thumbnails || {};
+  if (!t.default && !t.medium) return null;                       // video privato o eliminato
+  return { id: it.contentDetails.videoId, title: s.title, ch: s.videoOwnerChannelId || s.channelId, chTitle: s.videoOwnerChannelTitle || s.channelTitle,
+    at: it.contentDetails.videoPublishedAt || s.publishedAt, dur: 0, live: false, views: 0, likes: 0, comments: 0,
+    thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "", desc: (s.description || "").slice(0, 200), cat: "", tags: [] };
+}
 async function channelLatest(id){
   const key = "ch:" + id, rc = S.relCache;
-  if (rc[key] && Date.now() - rc[key].at < 12 * 3600000) return remember(rc[key].list);
-  const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + id.slice(2), maxResults: 10 });
-  const ids = (j.items || []).map(i => i.contentDetails.videoId);
-  const list = ids.length ? remember((await videoDetails(ids)).filter(v => v.snippet.liveBroadcastContent !== "upcoming").map(toVideo)) : [];
+  if (rc[key] && Date.now() - rc[key].at < 24 * 3600000) return remember(rc[key].list);
+  const j = await api("playlistItems", { part: "snippet,contentDetails", playlistId: "UULF" + id.slice(2), maxResults: 10 });
+  const list = remember((j.items || []).map(fromPlaylistItem).filter(Boolean));
   rc[key] = { at: Date.now(), list }; save(); return list;
 }
 async function loadHome(manual){
@@ -841,8 +849,8 @@ async function loadHome(manual){
     let pool = [];
     if (cats.length) {
       const pages = cats.map(c => { const i = manual ? ((S.homePage[c] || 0) + 1) % 4 : (S.homePage[c] || 0); S.homePage[c] = i; return [c, i]; });
-      const favs = favChannels(p), pick = favs.length ? [0, 1, 2].map(k => favs[((S.homePage._f || 0) + k) % favs.length]) : [];
-      if (manual) S.homePage._f = (S.homePage._f || 0) + 3;
+      const favs = favChannels(p), pick = favs.length ? [0, 1].map(k => favs[((S.homePage._f || 0) + k) % favs.length]) : [];
+      if (manual) S.homePage._f = (S.homePage._f || 0) + 2;
       const lists = await Promise.all([
         ...pages.map(([c, i]) => chartPage(c, i, false).catch(() => [])),
         ...[...new Set(pick)].map(id => channelLatest(id).catch(() => []))
@@ -893,16 +901,31 @@ function cardMenu(id){
 let menuVideo = null;
 
 /* Ricerca su tutto YouTube (costa 100 unità di quota a ricerca) */
-async function doSearch(q){
+let searchLocal = null, searchYT = false;
+function localSearch(q){
+  const ws = q.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(w => w.length > 1);
+  if (!ws.length) return [];
+  const out = [];
+  for (const v of CACHE.values()) {
+    const hay = (v.title + " " + v.chTitle + " " + (v.tags || []).join(" ")).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const hits = ws.filter(w => hay.includes(w)).length;
+    if (hits === ws.length) out.push([hits + (v.title.toLowerCase().includes(q.toLowerCase()) ? 2 : 0), v]);
+  }
+  return out.sort((a, b) => b[0] - a[0] || b[1].at.localeCompare(a[1].at)).map(x => x[1]).slice(0, 40);
+}
+function doSearch(q){
   searchQ = q.trim(); if (!searchQ) return;
+  searchErr = ""; searchYT = false;
+  const key = S.opt.region + ":" + searchQ.toLowerCase(), hit = S.sCache[key];
+  if (hit && Date.now() - hit.at < 24 * 3600000) { searchRes = remember(hit.list); searchYT = true; searchLocal = null; return renderSearch(); }
+  searchLocal = localSearch(searchQ); searchRes = null; renderSearch();
+}
+/* Ricerca su tutto YouTube: 100 unità (costo fisso di Google), solo quando la chiedi */
+async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
-  searchBusy = true; searchErr = ""; searchRes = null; renderSearch();
-  try {
-    const r = await searchVideos(searchQ, 30);
-    searchRes = r.list;
-    if (r.cached) toast("Ricerca già fatta oggi: 0 unità");
-    ensureAvatars(searchRes);
-  } catch (e) { searchErr = errMsg(e); }
+  searchBusy = true; searchErr = ""; renderSearch();
+  try { const r = await searchVideos(searchQ, 30); searchRes = r.list; searchYT = true; searchLocal = null; }
+  catch (e) { searchErr = errMsg(e); }
   finally { searchBusy = false; renderSearch(); }
 }
 
@@ -940,7 +963,7 @@ function card(x, menu){
   return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
     <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
       ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
-    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch))}" alt="${esc(x.chTitle)}" data-ch="${x.ch}">
+    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="${esc(x.chTitle)}" data-ch="${x.ch}">
       <div><div class="title">${esc(x.title)}</div><div class="sub">${bits}</div></div></div>
   </button>`;
 }
@@ -996,11 +1019,15 @@ function renderSearch(){
       <button class="btn" type="submit">Cerca</button></form><div id="sRes"></div>`;
   }
   const r = $("#sRes");
-  if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}”…</p></div>`;
+  const ytBtn = `<div style="padding:12px 16px 16px"><button class="btn" data-act="searchYT">Cerca “${esc(searchQ)}” su tutto YouTube · 100 unità</button></div>`;
+  if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}” su YouTube…</p></div>`;
+  else if (searchLocal && !searchRes) r.innerHTML = (searchErr ? `<div class="status err" style="padding:12px 16px 0">Errore: ${esc(searchErr)}</div>` : "") + ytBtn + (searchLocal.length
+      ? `<div class="group">Tra i video che YTG conosce già · 0 unità</div>` + searchLocal.map(card).join("")
+      : `<div class="empty"><p>Nessun video già noto contiene “${esc(searchQ)}”.</p></div>`);
   else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
   else if (searchRes && !searchRes.length) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
   else if (searchRes) r.innerHTML = `<div class="group">Risultati per “${esc(searchQ)}”</div>` + searchRes.map(card).join("");
-  else r.innerHTML = `<div class="empty"><p>Cerca tra tutti i video di YouTube. Gli Shorts vengono esclusi.<br>Ogni ricerca nuova usa 100 unità; ripeterla entro 24 ore è gratis.</p></div>`;
+  else r.innerHTML = `<div class="empty"><p>La ricerca guarda prima tra i video che YTG conosce già, senza consumare unità.<br>Se non basta, puoi cercare su tutto YouTube (100 unità; la stessa ricerca entro 24 ore è gratis).</p></div>`;
 }
 
 function renderChannels(status, isErr){
@@ -1057,7 +1084,7 @@ function renderSettings(){
       <div style="height:8px;border-radius:4px;background:var(--raised);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100, (S.qDay === qDay() ? S.qUsed || 0 : 0) / 100)}%;background:${quotaOut() ? "var(--danger)" : "var(--accent)"}"></div></div>
       <div class="help" style="padding:0">${quotaOut() ? "Unità finite per oggi. " : ""}Si azzerano ogni giorno alle 9:00. Conteggio stimato da questo telefono.<br>
         ${S.lastCost != null ? `Ultimo aggiornamento delle iscrizioni: <b>${S.lastCost} unità</b>${S.lastInfo ? `, ${S.lastInfo.checked} canali scaricati, ${S.lastInfo.fresh} video nuovi` : ""}.<br>` : ""}
-        Costi indicativi: Iscrizioni ${Math.ceil(S.channels.length / 50) + 2}–${Math.ceil(S.channels.length / 50) + 20} (scarica solo i canali con video nuovi; il primo aggiornamento scarica tutto una volta) · Home 0–6 · aprire un video 2–4 · pagina di un canale 3 · ricerca 100, gratis se ripetuta entro 24 ore · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
+        Costi indicativi: aggiornare le Iscrizioni 3–15 (in automatico al massimo ogni 2 ore, solo se sei in quella scheda) · Home 0–5 · aprire un video 0 · leggere i commenti 1 · descrizione completa 1 · pagina di un canale 2 · ricerca: gratis tra i video già noti, 100 su tutto YouTube · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
     </div>
 
     <h2 style="margin-top:22px">Chiave API YouTube</h2>
@@ -1126,7 +1153,7 @@ async function myChannelId(){
 }
 async function loadNotifs(force){
   if (nBusy || !S.key || quotaOut()) return;
-  if (!force && Date.now() - (S.nFetch || 0) < 30 * 60000) return;
+  if (!force && Date.now() - (S.nFetch || 0) < 3 * 3600000) return;
   nBusy = true;
   try {
     const me = await myChannelId().catch(() => "");
@@ -1184,7 +1211,7 @@ function openNotifs(){
   remember(S.nVids || []);
   renderNotifs(); openSheet("#notifs");
   S.seenNotif = Date.now(); save(); updateBell();
-  loadNotifs(Date.now() - (S.nFetch || 0) > 5 * 60000);
+  loadNotifs(Date.now() - (S.nFetch || 0) > 30 * 60000);
 }
 
 /* ---------- player e commenti ---------- */
@@ -1323,7 +1350,7 @@ const ICON = {
   dots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>'
 };
 const num = n => !n ? "0" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln" : n >= 1e3 ? (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(".0","").replace(".",",") + "K" : String(n);
-let myRating = "none";
+let myRating = "none", cLoadedFor = "", statsFor = "";
 
 function openVideo(id){
   const x = CACHE.get(id); if (!x) return;
@@ -1336,9 +1363,9 @@ function openVideo(id){
   $("#cIn").placeholder = S.clientId ? "Aggiungi un commento…" : "Configura l'accesso Google per commentare";
   $("#cIn").disabled = $("#cForm button").disabled = !S.clientId;
   openSheet("#player");
-  cPage = ""; loadComments(true);
-  refreshStats(id);
-  if (tokenOk()) apiAuth("videos/getRating", { id }).then(j => { if (current?.id === id) { myRating = j.items?.[0]?.rating || "none"; paintRating(); } }).catch(() => {});
+  cPage = ""; cLoadedFor = ""; statsFor = "";
+  $("#cList").innerHTML = "";
+  myRating = (S.likedIds || []).includes(id) ? "like" : "none"; paintRating();   // dai Mi piace già noti, senza chiedere a YouTube
   rerender();
 }
 
@@ -1353,7 +1380,7 @@ function renderWatch(){
     <div class="vdesc" id="vDesc" hidden><b>${x.views ? x.views.toLocaleString("it-IT") + " visualizzazioni" : ""}</b> · ${new Date(x.at).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
       <div class="d">${esc(x.desc || "Nessuna descrizione.")}</div></div>
     <div class="vact">
-      <img class="avatar" src="${esc(avatarOf(x.ch))}" alt="" data-ch="${x.ch}">
+      <img class="avatar" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="" data-ch="${x.ch}">
       <button class="pill${isSub(x.ch) ? " on" : ""}" id="vSub" data-act="vsub">${isSub(x.ch) ? "Iscritto" : "Iscriviti"}</button>
       <span class="sp"></span>
       <button class="rbtn" id="rLike" data-act="like" aria-label="Mi piace">${ICON.like}</button>
@@ -1363,7 +1390,7 @@ function renderWatch(){
     </div>
     <button class="ccard" data-act="openComments">
       <div class="h">Commenti<span id="cCount">${x.comments ? num(x.comments) : ""}</span></div>
-      <div class="pv" id="cPrev"><div class="sub">Carico…</div></div>
+      <div class="pv" id="cPrev"><div class="sub">Tocca per leggere i commenti</div></div>
     </button>
     <div class="group">Video simili</div><div id="rel"></div>
     <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili · 100 unità</button></div>`;
@@ -1419,6 +1446,14 @@ async function searchRelated(){
   } catch (e) { btn.disabled = false; btn.textContent = "Cerca altri video simili · 100 unità"; toast(errMsg(e)); }
 }
 
+/* i commenti si scaricano (1 unità) solo quando li apri */
+function openComments(){
+  if (!current) return;
+  if (cLoadedFor !== current.id) { cLoadedFor = current.id; cPage = ""; $("#cList").innerHTML = `<div class="status">Carico i commenti…</div>`; loadComments(true); }
+  $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : "");
+  openSheet("#cmts");
+}
+
 function paintRating(){
   $("#rLike")?.classList.toggle("on", myRating === "like");
   $("#rDislike")?.classList.toggle("on", myRating === "dislike");
@@ -1454,7 +1489,9 @@ async function rate(kind){
     const r = await fetch(API + "videos/rate?" + new URLSearchParams({ id: video.id, rating: next }), { method: "POST", headers: { Authorization: "Bearer " + S.token } });
     if (r.status === 401) { S.token = ""; save(); myRating = prev; paintRating(); return rate(kind); }
     if (!r.ok) throw new Error("Errore " + r.status);
-    if (next === "like") { S.likes = [{ cat: video.cat, ch: video.ch, tags: video.tags || [] }].concat(S.likes).slice(0, 80); save(); }
+    if (next === "like") { S.likes = [{ cat: video.cat, ch: video.ch, tags: video.tags || [] }].concat(S.likes).slice(0, 80); }
+    S.likedIds = (S.likedIds || []).filter(x => x !== video.id); if (next === "like") S.likedIds.unshift(video.id);
+    save();
   } catch (e) { myRating = prev; paintRating(); toast("Non riuscito: " + e.message); }
 }
 
@@ -1644,14 +1681,16 @@ function rowHTML(x){
 async function loadChanVideos(first){
   const id = CH.id, list = $("#chList"), btn = $("#chMoreBtn");
   if (first) list.innerHTML = `<div class="status" style="padding:12px 16px">Carico i video…</div>`;
-  const fetchPage = pl => api("playlistItems", { part: "contentDetails", playlistId: pl + id.slice(2), maxResults: 30, ...(CH.page ? { pageToken: CH.page } : {}) });
+  const fetchPage = pl => api("playlistItems", { part: "snippet,contentDetails", playlistId: pl + id.slice(2), maxResults: 30, ...(CH.page ? { pageToken: CH.page } : {}) });
   try {
     let j;
     if (CH.strict) { try { j = await fetchPage("UULF"); } catch (e) { if (e.reason === "quotaExceeded") throw e; CH.strict = false; CH.page = ""; } }
     if (!CH.strict) j = await fetchPage("UU");
     if (CH?.id !== id) return;
-    const det = await videoDetails((j.items || []).map(i => i.contentDetails.videoId));
-    const vids = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && (CH.strict || !looksShort(v, secs(v.contentDetails.duration)))).map(toVideo))
+    // con la playlist senza Shorts bastano i dati della playlist (1 unità); altrimenti servono le durate per togliere gli Shorts
+    const vids = (CH.strict ? remember((j.items || []).map(fromPlaylistItem).filter(Boolean))
+      : remember((await videoDetails((j.items || []).map(i => i.contentDetails.videoId)))
+          .filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo)))
       .sort((a, b) => b.at.localeCompare(a.at));
     CH.vids = first ? vids : CH.vids.concat(vids); CH.page = j.nextPageToken || "";
     if (CH.tab !== "videos") return;
@@ -1687,10 +1726,8 @@ async function openPlaylist(plId, title){
   list.innerHTML = `<div style="padding:8px 16px"><button class="more" data-ctab="playlists">‹ Tutte le playlist</button>
     <div style="font:700 15px var(--serif);margin-top:4px">${esc(title)}</div></div><div id="plItems" class="status" style="padding:8px 16px">Carico…</div>`;
   try {
-    const j = await api("playlistItems", { part: "contentDetails", playlistId: plId, maxResults: 50 });
-    const ids = (j.items || []).map(i => i.contentDetails.videoId);
-    const det = await videoDetails(ids), order = new Map(ids.map((id, i) => [id, i]));
-    const vids = remember(det.map(toVideo).sort((a, b) => order.get(a.id) - order.get(b.id)));
+    const j = await api("playlistItems", { part: "snippet,contentDetails", playlistId: plId, maxResults: 50 });
+    const vids = remember((j.items || []).map(fromPlaylistItem).filter(Boolean));
     const box = $("#plItems"); if (!box) return;
     box.className = ""; box.style.padding = "0";
     box.innerHTML = vids.map(rowHTML).join("") || `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`;
@@ -1781,7 +1818,8 @@ async function loadMe(manual){
       liked: (liked.items || []).filter(notShort).map(toVideo),
       uploads
     };
-    remember(S.meData.liked); remember(S.meData.uploads); save();
+    remember(S.meData.liked); remember(S.meData.uploads);
+    S.likedIds = [...new Set(S.meData.liked.map(v => v.id).concat(S.likedIds || []))].slice(0, 300); save();
     if (manual) toast("Profilo aggiornato");
   } catch (e) {
     ME.err = e.relogin ? "Accedi di nuovo per vedere il tuo profilo." : errMsg(e);
@@ -1888,11 +1926,11 @@ function go(t){
   $("#hTitle").textContent = LABEL(t);
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs" || t === "vMe");
   $("#btnGear").classList.toggle("on", t === "vSettings");
-  if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome(); }
-  if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
+  if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 12 * 3600000) loadHome(); }
+  if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 2 * 3600000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
-  if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 3600000) loadMe(); }
+  if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 24 * 3600000) loadMe(); }
   if (t === "vSettings") renderSettings();
   window.scrollTo(0, 0);
 }
@@ -1914,7 +1952,7 @@ document.addEventListener("click", e => {
   if (t.dataset.nv) {
     const v = CACHE.get(t.dataset.nv); if (!v) return toast("Video non disponibile");
     closeSheet("#notifs"); openVideo(v.id);
-    return setTimeout(() => { $("#cmTitle").textContent = "Commenti"; openSheet("#cmts"); }, 350);
+    return setTimeout(openComments, 350);
   }
   if (t.dataset.unlater) { e.stopPropagation(); return toggleLater(S.later.find(v => v.id === t.dataset.unlater), false); }
   if (t.dataset.mypl) return openMyPlaylist(t.dataset.mypl);
@@ -1971,7 +2009,8 @@ document.addEventListener("click", e => {
   if (a === "copyLink") { closeMenu(); navigator.clipboard?.writeText("https://youtu.be/" + current.id).then(() => toast("Link copiato"), () => toast("https://youtu.be/" + current.id)); }
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
   if (a === "relSearch") searchRelated();
-  if (a === "openComments") { $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : ""); openSheet("#cmts"); }
+  if (a === "searchYT") return doSearchYT();
+  if (a === "openComments") return openComments();
   if (/^c(Play|Back|Fwd|Mute|Rate|Full)$/.test(a)) return ctl(a);
   if (a === "ctlShow") return ctlShow();
   if (a === "ctlToggle") { const c = $("#pCtl"); if (c.classList.contains("show")) { clearTimeout(ctlTimer); c.classList.remove("show"); } else ctlShow(); return; }
@@ -1980,7 +2019,10 @@ document.addEventListener("click", e => {
     S.blocked[current.ch] = 1; S.home = S.home.filter(v => v.ch !== current.ch); save();
     closeMenu(); toast(`Non vedrai più ${current.chTitle} nella Home`); rerender();
   }
-  if (a === "desc") { const d = $("#vDesc"); d.hidden = !d.hidden; t.textContent = d.hidden ? "…altro" : "meno"; }
+  if (a === "desc") {
+    const d = $("#vDesc"); d.hidden = !d.hidden; t.textContent = d.hidden ? "…altro" : "meno";
+    if (!d.hidden && current && statsFor !== current.id) { statsFor = current.id; refreshStats(current.id); }   // descrizione completa: 1 unità, solo se la apri
+  }
   if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.nope = []; S.hidden = {}; S.homeSeen = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
@@ -2080,7 +2122,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011090809";
+const BUILD = "20261011093633";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -2140,12 +2182,11 @@ if (after?.do === "comment") {
 }
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell(); paintQuota(); setInterval(paintQuota, 60000); setTimeout(() => loadNotifs(), 2500);
-if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   loadNotifs();
-  if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh();
-  if (tab === "vHome" && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome();
+  if (tab === "vSubs" && !quotaOut() && Date.now() - S.lastFetch > 2 * 3600000) refresh();
+  if (tab === "vHome" && !quotaOut() && Date.now() - S.homeFetch > 12 * 3600000) loadHome();
 });
 saveNow();
 })();
