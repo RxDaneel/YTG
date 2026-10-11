@@ -36,7 +36,7 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
 /* la pagina non scorre mai: scorre solo <main>. Così su iPhone le barre non possono "staccarsi" (succedeva dopo tastiera o rotazione) */
-body{display:flex;flex-direction:column;position:fixed;inset:0}
+body{display:flex;flex-direction:column;position:fixed;top:0;left:0;right:0;height:var(--appH,100%)}
 button,input,select,textarea{font:inherit;color:inherit}
 /* niente zoom: iPhone ingrandisce la pagina se un campo di testo ha caratteri sotto i 16px */
 html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -1271,6 +1271,7 @@ function renderSettings(){
     <h2 style="margin-top:22px">Diagnostica</h2>
     <div class="panel" style="padding:12px 14px"><div class="help" style="padding:0;font-variant-numeric:tabular-nums;line-height:1.7">
       Versione ${esc(BUILD)} · ${idb ? "memoria completa" : "memoria ridotta"}<br>
+      Schermo: ${innerHeight} · ${Math.round(window.visualViewport?.height || 0)} · ${Math.max(screen.width, screen.height)} · app ${Math.round(document.body.getBoundingClientRect().height)} · margine sotto ${Math.round(parseFloat(getComputedStyle($("nav")).paddingBottom))}<br>
       Account: ${esc(S.me?.title || "nessuno")}${S.myChId ? " (canale ok)" : ""} · accesso ${tokenOk() ? "attivo" : "scaduto"}<br>
       Chiave: …${esc((S.key || "").slice(-4))} · ID client: …${esc((S.clientId || "").split("-")[0].slice(-4))}<br>
       Iscrizioni: ${S.channels.length} canali · ${Object.keys(S.chMeta || {}).length} controllati · ${S.videos.length} video<br>
@@ -1476,6 +1477,27 @@ function tryFullscreen(){
     if (!land && document.fullscreenElement) document.exitFullscreen().catch(() => {});
   } catch {}
 }
+/* Su iPhone, aperta dalla schermata Home, l'app occupa tutto lo schermo: uso l'altezza vera dello schermo,
+   così la barra in basso arriva sempre fino al fondo. Con la tastiera aperta seguo lo spazio visibile. */
+function fitApp(){
+  const root = document.documentElement, vv = window.visualViewport;
+  const portrait = matchMedia("(orientation: portrait)").matches;
+  const scr = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  const typing = document.activeElement?.matches?.("input,textarea");
+  let hgt = Math.max(innerHeight, vv ? Math.round(vv.height) : 0);
+  if (standalone && !typing && scr > hgt && scr - hgt < 200) hgt = scr;
+  root.style.setProperty("--appH", hgt + "px");
+}
+fitApp();
+addEventListener("resize", fitApp);
+addEventListener("orientationchange", () => setTimeout(fitApp, 300));
+window.visualViewport?.addEventListener("resize", fitApp);
+document.addEventListener("focusin", () => setTimeout(fitApp, 300));
+document.addEventListener("focusout", () => setTimeout(fitApp, 300));
+addEventListener("pageshow", () => setTimeout(fitApp, 100));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(fitApp, 100); });
+
 function applyLand(){
   const land = false, root = document.documentElement;   // schermo intero automatico girando il telefono: disattivato su richiesta
   const vv = window.visualViewport, W = Math.round(vv ? vv.width * vv.scale : innerWidth), H = Math.round(vv ? vv.height * vv.scale : innerHeight);
@@ -2336,7 +2358,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011101740";
+const BUILD = "20261011101959";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
