@@ -370,6 +370,12 @@ const S = Object.assign({
   chMeta: {}, sCache: {}, relCache: {}, lastCost: null, nope: [], hidden: {}, homeSeen: {}, homePage: {}, chartTok: {}
 }, load());
 S.opt = Object.assign({}, DEF_OPT, S.opt || {});
+/* Chiave e ID client già inseriti: così, reinstallando l'app sulla Home, non vanno incollati di nuovo.
+   La chiave è visibile a chiunque apra il codice del sito: va limitata nella console Google a rxdaneel.github.io/* e alla sola YouTube Data API. */
+const DEFAULT_KEY = "AIzaSyBosG9sO5iElJzGat5-BkeLzqA1ZXj2FH4";
+const DEFAULT_CLIENT = "492839226235-qhlirhn4n0c0ag4nkescckthv0v413jk.apps.googleusercontent.com";
+if (!S.key) S.key = DEFAULT_KEY;
+if (!S.clientId) S.clientId = DEFAULT_CLIENT;
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
@@ -1999,7 +2005,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011074025";
+const BUILD = "20261011074353";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
