@@ -48,7 +48,8 @@ header{position:fixed;top:0;left:0;right:0;z-index:20;background:var(--glass);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:calc(var(--top) + 6px) 8px 6px 16px;
   display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line)}
 header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
-.logo{border:0;background:none;padding:2px 4px 2px 0;font:900 24px/1 var(--font);letter-spacing:-.04em;color:var(--fg);flex:none}
+.logo{border:0;background:none;padding:4px 6px 4px 0;color:var(--muted);flex:none;display:flex;align-items:center}
+.logo svg{width:42px;height:26px;display:block}
 .logo:active{opacity:.6}
 #hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 /* barretta delle unità usate oggi, al posto della linea sotto la barra in alto */
@@ -274,7 +275,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 
 <header>
   <button id="qbar" data-act="qinfo" aria-label="Unità usate oggi"><i id="qfill"></i></button>
-  <h1><button class="logo" id="logo" aria-label="YT-, vai alla Home">YT-</button><span id="hTitle"></span></h1>
+  <h1><button class="logo" id="logo" aria-label="YTG, vai alla Home"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M5 4.2v15.6L18.6 12z" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><rect x="24" y="10.2" width="12" height="3.6" rx="1.8" fill="currentColor"/></svg></button><span id="hTitle"></span></h1>
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
@@ -2077,7 +2078,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011090011";
+const BUILD = "20261011090235";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
