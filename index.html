@@ -483,18 +483,30 @@ function startLogin(after){
   const state = Math.random().toString(36).slice(2);
   try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: "token",
-    scope: SCOPE, include_granted_scopes: "true", state, ...(S.me && !after?.pick ? {} : { prompt: "select_account" }) });
+    scope: SCOPE, include_granted_scopes: "true", state,
+    ...(after?.silent ? { prompt: "none" } : S.me && !after?.pick ? {} : { prompt: "select_account" }) });
   saveNow();
   location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
 
+/* L'accesso di Google per le web app dura un'ora e non può essere reso permanente senza un server.
+   Quando scade, YTG lo rinnova in silenzio: va da Google con prompt=none e, se sei ancora collegato,
+   torna subito indietro con un nuovo accesso, senza chiederti nulla. Solo se Google vuole una conferma compare il pulsante. */
+function reauth(after){
+  if (S.me && (!S.silentFail || Date.now() - S.silentFail > 6 * 3600000)) return startLogin({ ...after, silent: true });
+  return startLogin(after);
+}
 function readLoginReturn(){
   if (!location.hash.includes("access_token") && !location.hash.includes("error=")) return null;
   const h = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, "", location.pathname);
   let st = null, after = { do: "sync" };
   try { st = sessionStorage.getItem("ytg.state"); after = JSON.parse(sessionStorage.getItem("ytg.after")) || after; } catch {}
-  if (h.get("error")) { setTimeout(() => toast("Accesso annullato"), 300); return null; }
+  if (h.get("error")) {
+    if (after.silent) { S.silentFail = Date.now(); save(); return { do: "silentFailed", orig: after }; }
+    setTimeout(() => toast("Accesso annullato"), 300); return null;
+  }
+  if (after.silent) S.silentFail = 0;
   if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return null; }
   S.token = h.get("access_token"); S.tokenScope = SCOPE;
   S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
@@ -514,7 +526,7 @@ async function apiAuth(path, params, body){
 }
 
 async function syncSubs(){
-  if (!tokenOk()) return startLogin({ do: "sync" });
+  if (!tokenOk()) return reauth({ do: "sync", force: true });
   if (busy) return;
   busy = true; spin(true);
   try {
@@ -1428,7 +1440,7 @@ async function rate(kind){
   const next = myRating === kind ? "none" : kind;
   if (!tokenOk()) {
     try { sessionStorage.setItem("ytg.video", JSON.stringify(video)); } catch {}
-    return startLogin({ do: "rate", rating: next, video: video.id, tab });
+    return reauth({ do: "rate", rating: next, video: video.id, tab });
   }
   const prev = myRating; myRating = next; paintRating();
   if (prev === "like" && next !== "like") video.likes = Math.max(0, (video.likes || 1) - 1);
@@ -1561,7 +1573,7 @@ async function loadReplies(parentId){
 async function postComment(video, text){
   if (!tokenOk()) {
     try { sessionStorage.setItem("ytg.video", JSON.stringify(video)); } catch {}
-    return startLogin({ do: "comment", text, video: video.id, tab });
+    return reauth({ do: "comment", text, video: video.id, tab });
   }
   const btn = $("#cForm button"); if (btn) btn.disabled = true;
   try {
@@ -1687,7 +1699,7 @@ async function toggleSub(id, title, thumb){
   id = id || CH.id; title = title || CH.info?.snippet?.title || ""; thumb = thumb || CH.info?.snippet?.thumbnails?.default?.url || "";
   if (!tokenOk()) {
     try { sessionStorage.setItem("ytg.video", current ? JSON.stringify(current) : ""); } catch {}
-    return startLogin({ do: "sub", ch: id, title, thumb, video: current?.id || "", tab });
+    return reauth({ do: "sub", ch: id, title, thumb, video: current?.id || "", tab });
   }
   const btns = [$("#subBtn"), $("#vSub")].filter(Boolean); btns.forEach(b => b.disabled = true);
   try {
@@ -1734,7 +1746,11 @@ async function authVideos(ids){
 const notShort = v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails?.duration));
 async function loadMe(manual){
   if (ME.busy) return;
-  if (!tokenOk()) { if (manual) startLogin({ do: "me" }); return; }
+  if (!tokenOk()) {
+    const silentOk = S.me && (!S.silentFail || Date.now() - S.silentFail > 6 * 3600000);
+    if (manual || silentOk) reauth({ do: "me" });     // in automatico solo il rinnovo silenzioso, mai la pagina di accesso
+    return;
+  }
   ME.busy = true; ME.err = ""; spin(true); renderMe();
   try {
     const settle = p => p.then(v => v, e => { if (e.relogin) throw e; return { items: [], err: e }; });
@@ -1873,7 +1889,7 @@ function go(t){
   if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
-  if (t === "vMe") { ME.pl = null; renderMe(); if (tokenOk() && Date.now() - (S.meData?.at || 0) > 3600000) loadMe(); }
+  if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 3600000) loadMe(); }
   if (t === "vSettings") renderSettings();
   window.scrollTo(0, 0);
 }
@@ -1917,7 +1933,7 @@ document.addEventListener("click", e => {
   if (a === "pickAccount") return startLogin({ do: "sync", pick: true });
   if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
-  if (a === "login") startLogin({ do: "sync" });
+  if (a === "login") reauth({ do: "sync" });
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
   if (a === "moreComments") loadComments(false);
@@ -1939,7 +1955,7 @@ document.addEventListener("click", e => {
   if (a === "laterCur") { closeMenu(); return toggleLater(current, true); }
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
-  if (a === "meLogin") return startLogin({ do: "me" });
+  if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
   if (a === "meBack") { ME.pl = null; renderMe(); return window.scrollTo(0, 0); }
   if (a === "cCC") { ctlShow(true); return ccMenu(); }
@@ -2061,7 +2077,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011084242";
+const BUILD = "20261011090011";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -2110,7 +2126,15 @@ if (after?.do === "comment") {
   if (v) { CACHE.set(v.id, v); openVideo(v.id); }
   if (after.do === "sub") setTimeout(() => toggleSub(after.ch, after.title, after.thumb), 500);
   else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
-} else if (after) { go("vSettings"); syncSubs(); }
+} else if (after?.do === "silentFailed") {
+  const o = after.orig || {};
+  go(o.tab || (o.do === "me" ? "vMe" : S.opt.showHome ? "vHome" : "vSubs"));
+  setTimeout(() => toast("Google chiede di confermare l'accesso: tocca Accedi con Google"), 400);
+} else if (after) {
+  const needSync = after.force || after.pick || !S.channels.length || Date.now() - (S.lastSync || 0) > 7 * 864e5;
+  if (needSync) { go("vSettings"); syncSubs(); }
+  else { go(after.tab || (S.opt.showHome ? "vHome" : "vSubs")); setTimeout(() => toast("Accesso rinnovato"), 300); }
+}
 else go(S.opt.showHome ? "vHome" : "vSubs");
 updateBell(); paintQuota(); setInterval(paintQuota, 60000); setTimeout(() => loadNotifs(), 2500);
 if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
