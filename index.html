@@ -1290,7 +1290,7 @@ function tryFullscreen(){
   } catch {}
 }
 function applyLand(){
-  const land = innerWidth > innerHeight && innerHeight < 600, root = document.documentElement;
+  const land = false, root = document.documentElement;   // schermo intero automatico girando il telefono: disattivato su richiesta
   const vv = window.visualViewport, W = Math.round(vv ? vv.width * vv.scale : innerWidth), H = Math.round(vv ? vv.height * vv.scale : innerHeight);
   root.style.setProperty("--vh", (H || innerHeight) + "px"); root.style.setProperty("--vw", (W || innerWidth) + "px");
   if (land !== root.classList.contains("land")) {
@@ -2080,7 +2080,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011090602";
+const BUILD = "20261011090809";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
