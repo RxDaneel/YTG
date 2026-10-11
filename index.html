@@ -258,10 +258,10 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 /* telefono in orizzontale: il player occupa tutto lo schermo, il resto si nasconde */
 .land #player.open{overflow:hidden;padding:0;background:#000}
 .land #player.open .pbar,.land #player.open .pinfo{display:none}
-/* in orizzontale il video riempie tutto lo schermo, da bordo a bordo (taglia un po' sopra e sotto), senza la fascia nera laterale */
-.land #player.open .pwrap{overflow:hidden;background:#000}
-.land #player.open .frame{position:absolute;left:50%;top:50%;width:max(var(--vw,100vw),calc(var(--vh,100vh) * 16 / 9));height:auto;aspect-ratio:16/9;
-  transform:translate(-50%,-50%);max-width:none}
+/* in orizzontale il player copre esattamente lo schermo (misurato in JS) e il video resta intero e centrato,
+   con le bande nere ai lati come nell'app di YouTube: niente zoom e niente spostamento verso destra */
+.land #player.open .pwrap{position:fixed;left:0;top:0;width:var(--vw,100vw);height:var(--vh,100vh);overflow:hidden;background:#000}
+.land #player.open .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none;transform:none}
 #ptr{position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
   background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.3);display:grid;place-items:center;opacity:0;transform:translateY(-50px);pointer-events:none}
 #ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
@@ -1250,7 +1250,8 @@ function tryFullscreen(){
 }
 function applyLand(){
   const land = innerWidth > innerHeight && innerHeight < 600, root = document.documentElement;
-  root.style.setProperty("--vh", innerHeight + "px"); root.style.setProperty("--vw", innerWidth + "px");
+  const vv = window.visualViewport, W = Math.round(vv ? vv.width * vv.scale : innerWidth), H = Math.round(vv ? vv.height * vv.scale : innerHeight);
+  root.style.setProperty("--vh", (H || innerHeight) + "px"); root.style.setProperty("--vw", (W || innerWidth) + "px");
   if (land !== root.classList.contains("land")) {
     root.classList.toggle("land", land);
     if (land) { $("#player").scrollTop = 0; ctlShow(); }
@@ -1258,6 +1259,7 @@ function applyLand(){
   }
 }
 addEventListener("resize", applyLand);
+window.visualViewport?.addEventListener("resize", applyLand);
 addEventListener("orientationchange", () => setTimeout(applyLand, 300));
 screen.orientation?.addEventListener?.("change", () => setTimeout(applyLand, 300));
 applyLand();
@@ -2030,7 +2032,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011075217";
+const BUILD = "20261011075404";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
