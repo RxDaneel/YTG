@@ -51,10 +51,10 @@ header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space
 .logo{border:0;background:none;padding:2px 4px 2px 0;font:900 24px/1 var(--font);letter-spacing:-.04em;color:var(--fg);flex:none}
 .logo:active{opacity:.6}
 #hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
-/* barretta delle unità usate oggi, in cima alla barra */
-#qbar{position:absolute;left:0;right:0;top:var(--top);height:12px;border:0;padding:0;background:none;cursor:pointer}
-#qbar::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--line)}
-#qfill{position:absolute;left:0;top:0;height:3px;width:0;background:var(--muted);transition:width .4s ease,background .4s}
+/* barretta delle unità usate oggi, al posto della linea sotto la barra in alto */
+#qbar{position:absolute;left:0;right:0;bottom:-2px;height:12px;border:0;padding:0;background:none;cursor:pointer;z-index:1}
+#qbar::before{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--line)}
+#qfill{position:absolute;left:0;bottom:0;height:3px;width:0;background:var(--muted);transition:width .4s ease,background .4s}
 #qfill.warn{background:var(--fg)}
 #qfill.out{background:var(--danger)}
 .icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
@@ -1996,7 +1996,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011073114";
+const BUILD = "20261011073452";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
