@@ -423,6 +423,7 @@ async function loadBig(){
   for (const k of ["hidden", "homeSeen", "homePage", "chartTok"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
   if (!Array.isArray(S.nope)) S.nope = [];
   if (!Array.isArray(S.mutedTopics)) S.mutedTopics = [];
+  if (!Array.isArray(S.myTopics)) S.myTopics = [];
   bigReady = true;
 }
 function save(){ clearTimeout(saveT); saveT = setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(saveNow, { timeout: 3000 }) : saveNow()), 1500); }
@@ -873,7 +874,7 @@ function topics(){
   const bump = (list, w) => list.forEach(v => (v.tags || []).forEach(t => { if (good(t)) score[t] = (score[t] || 0) + w; }));
   bump(S.likes, 3); bump(S.hist, 2); bump(S.nope, -4);
   const ranked = Object.entries(score).filter(([, s]) => s >= 3).sort((a, b) => b[1] - a[1]).map(x => x[0]);
-  const out = [];
+  const out = (S.myTopics || []).filter(t => !muted.has(t.toLowerCase())).slice();
   for (const t of ranked) { if (!out.some(o => o.includes(t) || t.includes(o))) out.push(t); if (out.length >= 10) break; }
   return out;
 }
@@ -969,11 +970,36 @@ async function loadHome(manual, noFetch, auto){
 }
 /* punteggio: pertinenza + gusti (tag, canali) + novità − video già mostrati in cima + un po' di casualità */
 function homeOk(v, p){ return !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0; }
+let vocabCache = null, vocabKey = "";
+function interestVocab(){
+  const key = S.videos.length + ":" + S.likes.length + ":" + S.hist.length + ":" + S.nope.length + ":" + (S.myTopics || []).join("|") + ":" + S.mutedTopics.length;
+  if (vocabCache && vocabKey === key) return vocabCache;
+  const per = new Map(), w = new Map();
+  const ok = x => x.length > 2 && !STOPW.has(x) && !GENERIC.has(x) && !/^\d+$/.test(x);
+  const split = v => { const s = new Set(); for (const x of words(v)) { if (x.includes(" ")) x.split(/\s+/).forEach(y => ok(y) && s.add(y)); if (ok(x)) s.add(x); } return s; };
+  for (const v of S.videos) for (const x of split(v)) (per.get(x) || per.set(x, new Set()).get(x)).add(v.ch);
+  for (const [x, chs] of per) if (chs.size >= 2) w.set(x, Math.log2(1 + chs.size));
+  const add = (list, k) => list.forEach(v => split({ title: v.title || "", tags: v.tags || [] }).forEach(x => w.set(x, (w.get(x) || 0) + k)));
+  add(S.likes, 2); add(S.hist.map(h => ({ tags: h.tags })), 1.5); add(S.nope, -2);
+  for (const t of S.myTopics || []) split({ title: t, tags: [t] }).forEach(x => w.set(x, (w.get(x) || 0) + 6));
+  for (const t of S.mutedTopics) split({ title: t, tags: [t] }).forEach(x => w.set(x, -4));
+  vocabCache = w; vocabKey = key; return w;
+}
+/* quanto un video parla dei tuoi interessi */
+function relevance(v, w){
+  let s = 0; const seen = new Set();
+  for (const x of words(v)) for (const y of x.includes(" ") ? x.split(/\s+/).concat(x) : [x]) { if (seen.has(y)) continue; seen.add(y); s += w.get(y) || 0; }
+  return s;
+}
+const REL_MIN = 2;
 function rankHome(lists, p, skip){
+  const w = interestVocab(), strict = w.size > 30;
   const now = Date.now(), best = new Map();
   for (const l of lists) for (const [v, base] of l) {
     if (!homeOk(v, p) || skip?.has(v.id)) continue;
-    let s = base + (p.ch[v.ch] || 0) * 1.2 + (p.cat[v.cat] || 0) * .15;
+    const rel = relevance(v, w);
+    if (strict && rel < REL_MIN) continue;                     // fuori dai tuoi interessi: non entra
+    let s = base + Math.min(rel, 15) * .5 + (p.ch[v.ch] || 0) * 1.2 + (p.cat[v.cat] || 0) * .15;
     for (const t of v.tags || []) s += Math.max(-4, Math.min(4, p.tag[t] || 0)) * .6;
     const days = (now - Date.parse(v.at)) / 864e5; if (days < 3) s += 1; else if (days < 21) s += .4;
     s += -(S.homeSeen[v.id] || 0) * 2 + Math.random() * 1.5;
@@ -1014,13 +1040,11 @@ async function moreHome(){
     const pick = disc.slice(0, 5);
     for (const l of await Promise.all(pick.map(id => channelLatest(id).catch(() => [])))) lists.push(l.map(v => [v, 2]));
     pick.forEach(id => { if (S.relCache["ch:" + id]) S.relCache["ch:" + id].used = Date.now(); });
-    // 2) se non bastano, la pagina successiva delle classifiche delle tue categorie (1 unità ciascuna), solo video in tema
+    // 2) se non bastano, altri 5 canali scoperti
     if (!lists.some(l => l.some(([v]) => homeOk(v, p) && !have.has(v.id)))) {
-      for (const c of (cats.length ? cats : [""]).slice(0, 2)) {
-        const i = ((S.homePage["m" + c] ?? S.homePage[c || "all"] ?? 0) + 1) % 4; S.homePage["m" + c] = i;
-        const l = await chartPage(c, i, false).catch(() => []);
-        lists.push(l.filter(v => (v.tags || []).some(t => (p.tag[t] || 0) > 0) || (p.ch[v.ch] || 0) > 0 || (T.length === 0)).map(v => [v, 0]));
-      }
+      const more2 = disc.slice(5, 10);
+      for (const l of await Promise.all(more2.map(id => channelLatest(id).catch(() => [])))) lists.push(l.map(v => [v, 2]));
+      more2.forEach(id => { if (S.relCache["ch:" + id]) S.relCache["ch:" + id].used = Date.now(); });
     }
     const added = appendHome(rankHome(lists, p, have), 400);
     if (!added) homeMoreEnd = true;
@@ -1135,7 +1159,7 @@ function renderHome(){
     return;
   }
   const head = S.homeMode === "foryou"
-    ? `<div class="group">Per te</div><div class="chips">${S.homeTags.map(t => `<span class="chip"><button class="chipq" data-q="${esc(t)}">${esc(t)}</button><button class="chipx" data-mute="${esc(t)}" aria-label="Togli ${esc(t)}">×</button></span>`).join("")}</div>`
+    ? `<div class="group">Per te</div><div class="chips"><button class="chip chipq" data-act="addTopic" style="padding:7px 13px">+ Interesse</button>${S.homeTags.map(t => `<span class="chip"><button class="chipq" data-q="${esc(t)}">${esc(t)}</button><button class="chipx" data-mute="${esc(t)}" aria-label="Togli ${esc(t)}">×</button></span>`).join("")}</div>`
     : `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>
        <div class="help" style="padding:0 16px 12px">Metti like ai video su YouTube o guardane qualcuno qui: la Home imparerà i tuoi gusti.${S.me ? "" : " Accedi con Google per usare anche i tuoi like."}</div>`;
   const shown = list.slice(0, homeShow);
@@ -2216,6 +2240,11 @@ document.addEventListener("click", e => {
   if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
   if (a === "homeMore") moreHome();
+  if (a === "addTopic") {
+    const box = document.createElement("form"); box.className = "field"; box.id = "topicForm";
+    box.innerHTML = `<input id="topicIn" placeholder="Es. aviazione militare, Blender, DCS" autocapitalize="off"><button class="btn" type="submit">Aggiungi</button>`;
+    $("#topicForm")?.remove(); $("#vHome .chips").after(box); $("#topicIn").focus(); return;
+  }
   if (a === "subsMore") { subsShow += 40; renderSubs(); }
   if (a === "login") reauth({ do: "sync" });
   if (a === "sync") syncSubs();
@@ -2278,6 +2307,14 @@ document.addEventListener("click", e => {
 document.addEventListener("submit", async e => {
   e.preventDefault();
   const id = e.target.id;
+  if (id === "topicForm") {
+    const t = $("#topicIn").value.trim().toLowerCase(); if (!t) return;
+    S.myTopics = [t].concat((S.myTopics || []).filter(x => x !== t)).slice(0, 20);
+    S.mutedTopics = S.mutedTopics.filter(x => x.toLowerCase() !== t);
+    S.homePage._t = -1; save(); $("#topicIn").blur();
+    toast(`Aggiunto “${t}”: cerco video su questo tema (100 unità)`);
+    return loadHome(true);
+  }
   if (id === "followForm") {
     const r = parseCommentLink($("#followIn").value);
     if (!r) { toast("Non riconosco il link: deve contenere lc=…"); return; }
@@ -2369,7 +2406,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011173833";
+const BUILD = "20261011192546";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
