@@ -930,21 +930,76 @@ function renderSettings(){
   </div>`;
 }
 
-/* ---------- notifiche: nuovi video dei tuoi canali dall'ultima volta ---------- */
-const newVideos = () => S.videos.filter(v => Date.parse(v.at) > S.seenNotif);
+/* ---------- notifiche: commenti ----------
+   1) commenti sotto i tuoi video (commentThreads con allThreadsRelatedToChannelId, 1 unità);
+   2) risposte ai commenti che hai scritto da YTG (commentThreads per id, fino a 50 in 1 unità).
+   YouTube non permette di elencare i commenti scritti altrove, quindi le risposte arrivano solo per quelli scritti qui.
+   Controllo al massimo ogni 30 minuti: circa 2–3 unità. */
+let nBusy = false;
+const newNotifs = () => (S.notifs || []).filter(n => Date.parse(n.at) > S.seenNotif);
 function updateBell(){
-  const n = newVideos().length, b = $("#bellBadge");
+  const n = newNotifs().length, b = $("#bellBadge");
   b.hidden = !n; b.textContent = n > 99 ? "99+" : n;
 }
+async function myChannelId(){
+  if (S.myChId) return S.myChId;
+  if (S.meData?.chan?.id) return S.myChId = S.meData.chan.id;
+  if (!tokenOk()) return "";
+  const j = await apiAuth("channels", { part: "id", mine: "true" });
+  S.myChId = j.items?.[0]?.id || ""; save(); return S.myChId;
+}
+async function loadNotifs(force){
+  if (nBusy || !S.key || quotaOut()) return;
+  if (!force && Date.now() - (S.nFetch || 0) < 30 * 60000) return;
+  nBusy = true;
+  try {
+    const me = await myChannelId().catch(() => "");
+    const mine = (S.myComments || []).slice(0, 50);
+    if (!me && !mine.length) return;
+    const out = [];
+    const [onMine, threads] = await Promise.all([
+      me ? api("commentThreads", { part: "snippet", allThreadsRelatedToChannelId: me, maxResults: 25, order: "time", textFormat: "plainText" }).catch(() => ({})) : {},
+      mine.length ? api("commentThreads", { part: "snippet,replies", id: mine.map(c => c.id).join(","), textFormat: "plainText", maxResults: 50 }).catch(() => ({})) : {}
+    ]);
+    for (const t of onMine.items || []) {
+      const c = t.snippet.topLevelComment.snippet;
+      if (c.authorChannelId?.value === me) continue;
+      out.push({ k: "c", id: t.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
+    }
+    for (const t of threads.items || []) {
+      for (const r of t.replies?.comments || []) {
+        const c = r.snippet;
+        if (me && c.authorChannelId?.value === me) continue;
+        out.push({ k: "r", id: r.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
+      }
+    }
+    out.sort((a, b) => b.at.localeCompare(a.at));
+    const need = [...new Set(out.map(n => n.v))].filter(id => !CACHE.has(id)).slice(0, 50);
+    if (need.length) { try { (await videoDetails(need)).forEach(v => CACHE.set(v.id, toVideo(v))); } catch {} }
+    S.notifs = out.slice(0, 40).map(n => ({ ...n, vt: CACHE.get(n.v)?.title || "un video", th: CACHE.get(n.v)?.thumb || "" }));
+    S.nVids = S.notifs.map(n => CACHE.get(n.v)).filter(Boolean).filter((v, i, a) => a.findIndex(x => x.id === v.id) === i);
+    S.nFetch = Date.now(); save();
+  } finally { nBusy = false; updateBell(); if ($("#notifs").classList.contains("open")) renderNotifs(); }
+}
+function renderNotifs(){
+  const list = S.notifs || [], seen = S.nSeenShown || 0;
+  const loggedOut = !S.myChId && !S.meData?.chan && !(S.myComments || []).length;
+  $("#nList").innerHTML = list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}">
+      <img class="avatar" loading="lazy" src="${esc(n.pic)}" alt="" style="width:36px;height:36px">
+      <div style="flex:1"><div class="title" style="font-size:13.5px;-webkit-line-clamp:3"><b>${esc(n.who)}</b> ${n.k === "r" ? "ha risposto al tuo commento" : "ha commentato"} su “${esc(n.vt)}”: ${esc(n.text)}</div>
+        <div class="sub">${ago(n.at)}</div></div>
+      ${n.th ? `<img class="t" loading="lazy" src="${esc(n.th)}" alt="" style="width:86px">` : ""}</button>`).join("")
+    : `<div class="empty"><p>${nBusy ? "Controllo i commenti…" : loggedOut
+        ? "Accedi con Google per ricevere qui i commenti ai tuoi video e le risposte ai commenti che scrivi in YTG."
+        : "Nessuna notifica. Qui compaiono i commenti ai tuoi video e le risposte ai commenti che scrivi in YTG."}</p>
+      ${loggedOut && S.clientId ? `<div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button></div>` : ""}</div>`;
+}
 function openNotifs(){
-  const fresh = new Set(newVideos().map(v => v.id));
-  const list = S.videos.slice(0, Math.max(30, fresh.size));
-  $("#nList").innerHTML = list.length ? list.map(x => `<button class="notif${fresh.has(x.id) ? " new" : ""}" data-v="${x.id}">
-      <img class="t" loading="lazy" src="${esc(x.thumb)}" alt="">
-      <div><div class="title" style="font-size:14px">${esc(x.chTitle)} ha caricato: ${esc(x.title)}</div><div class="sub">${ago(x.at)}</div></div></button>`).join("")
-    : `<div class="empty"><p>Nessuna notifica. Qui compaiono i nuovi video dei canali a cui sei iscritto.</p></div>`;
+  S.nSeenShown = S.seenNotif || 0;
+  remember(S.nVids || []);
+  renderNotifs(); openSheet("#notifs");
   S.seenNotif = Date.now(); save(); updateBell();
-  openSheet("#notifs");
+  loadNotifs(Date.now() - (S.nFetch || 0) > 5 * 60000);
 }
 
 /* ---------- player e commenti ---------- */
@@ -1335,6 +1390,8 @@ async function postComment(video, text){
     const j = await apiAuth("commentThreads", { part: "snippet" },
       { snippet: { videoId: video.id, topLevelComment: { snippet: { textOriginal: text } } } });
     const s = j.snippet?.topLevelComment?.snippet;
+    if (j.id) { S.myComments = [{ id: j.id, v: video.id, at: new Date().toISOString() }].concat(S.myComments || []).slice(0, 50); save(); }
+    if (s?.authorChannelId?.value && !S.myChId) S.myChId = s.authorChannelId.value;
     if (s && current?.id === video.id) {
       $("#cIn").value = "";
       const list = $("#cList"); if (list.querySelector(".status")) list.innerHTML = "";
@@ -1653,7 +1710,12 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  const t = e.target.closest("[data-nv],[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  if (t.dataset.nv) {
+    const v = CACHE.get(t.dataset.nv); if (!v) return toast("Video non disponibile");
+    closeSheet("#notifs"); openVideo(v.id);
+    return setTimeout(() => { $("#cmTitle").textContent = "Commenti"; openSheet("#cmts"); }, 350);
+  }
   if (t.dataset.unlater) { e.stopPropagation(); return toggleLater(S.later.find(v => v.id === t.dataset.unlater), false); }
   if (t.dataset.mypl) return openMyPlaylist(t.dataset.mypl);
   if (t.dataset.ch) return openChannel(t.dataset.ch);
@@ -1803,7 +1865,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261010234716";
+const BUILD = "20261011071816";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1837,10 +1899,11 @@ if (after?.do === "comment") {
   else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
 } else if (after) { go("vSettings"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
-updateBell();
+updateBell(); setTimeout(() => loadNotifs(), 2500);
 if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
+  loadNotifs();
   if (!quotaOut() && Date.now() - S.lastFetch > 60 * 60000) refresh();
   if (tab === "vHome" && !quotaOut() && Date.now() - S.homeFetch > 3 * 3600000) loadHome();
 });
