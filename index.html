@@ -268,6 +268,8 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 #ptr.go svg{animation:spin 1s linear infinite}
 #ptr.back{transition:transform .25s ease,opacity .25s ease}
+/* player di YouTube con i suoi comandi: la barra di YTG e lo strato per mostrarla sono nascosti */
+#pCtl,.reveal{display:none!important}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}.spin svg{animation:none}}
 </style>
 </head>
@@ -1260,7 +1262,7 @@ async function startPlayer(id){
   if (current?.id !== id) return;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 0, fs: 0, iv_load_policy: 3, disablekb: 1,
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3,
       ...(S.opt.cc ? { cc_load_policy: 1, cc_lang_pref: S.opt.cc } : {}) },
     events: {
       onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) ctlShow(true); else if (e.data === 1) ctlShow(); },
@@ -2078,7 +2080,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011090235";
+const BUILD = "20261011090602";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
