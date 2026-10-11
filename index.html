@@ -406,7 +406,7 @@ function idbClear(){
   });
 }
 async function loadBig(){
-  idb = await Promise.race([idbOpen(), new Promise(r => setTimeout(() => r(null), 2000))]);
+  idb = await Promise.race([idbOpen(), new Promise(r => setTimeout(() => r(null), 8000))]);
   if (idb) for (const k of BIG) { const v = await idbGet(k); if (v !== undefined && v !== null) S[k] = v; }
   for (const k of ["chMeta", "sCache", "relCache", "avatars"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
   if (!Array.isArray(S.later)) S.later = [];
@@ -649,9 +649,12 @@ async function refresh(manual, full){
     // 2) quali canali scaricare
     const newest = {};
     for (const v of S.videos) if (!newest[v.ch] || v.at > newest[v.ch]) newest[v.ch] = v.at;
+    const have = new Set(S.videos.map(v => v.ch));
     const changed = S.channels.filter(c => {
       const m = meta[c.id];
       if (!m) return true;
+      // i video di questo canale dovrebbero esserci ma non ci sono (memoria persa o salvataggio fallito): li riscarico
+      if (!have.has(c.id) && (m.ids || []).some(x => !(m.sk || []).includes(x))) return true;
       if (c.id in counts && counts[c.id] !== m.n) return true;
       return m.up && now - m.at > 2 * 3600000;                 // c'era una première in arrivo
     });
@@ -688,8 +691,8 @@ async function refresh(manual, full){
     const want = new Set(S.videos.filter(v => v.live).map(v => v.id)), lax = new Set();
     res.forEach((r, i) => {
       if (!r?.ids) return;
-      const prev = new Set(meta[todo[i].id]?.ids || []);
-      r.ids.forEach(id => { if (!known.has(id) && !prev.has(id)) want.add(id); if (!r.strict) lax.add(id); });
+      const sk = new Set(full ? [] : meta[todo[i].id]?.sk || []);
+      r.ids.forEach(id => { if (!known.has(id) && !sk.has(id)) want.add(id); if (!r.strict) lax.add(id); });
     });
     const det = want.size ? await videoDetails([...want]) : [];
     const fresh = new Map(), skipped = new Set(), upcoming = new Set();
@@ -700,9 +703,9 @@ async function refresh(manual, full){
     }
     res.forEach((r, i) => {
       if (!r?.ids) return;
-      const id = todo[i].id, prev = new Set(meta[id]?.ids || []);
-      meta[id] = { n: id in counts ? counts[id] : (meta[id]?.n ?? -1), at: now,
-        ids: r.ids.filter(x => known.has(x) || fresh.has(x) || skipped.has(x) || prev.has(x)),
+      const id = todo[i].id, oldSk = new Set(meta[id]?.sk || []);
+      meta[id] = { n: id in counts ? counts[id] : (meta[id]?.n ?? -1), at: now, ids: r.ids,
+        sk: r.ids.filter(x => skipped.has(x) || (oldSk.has(x) && !fresh.has(x))),
         up: r.ids.some(x => upcoming.has(x)) ? 1 : 0 };
     });
 
@@ -2032,7 +2035,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011075404";
+const BUILD = "20261011075805";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
