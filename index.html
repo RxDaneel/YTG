@@ -936,6 +936,19 @@ function renderSettings(){
    YouTube non permette di elencare i commenti scritti altrove, quindi le risposte arrivano solo per quelli scritti qui.
    Controllo al massimo ogni 30 minuti: circa 2–3 unità. */
 let nBusy = false;
+function followThread(threadId, videoId){
+  if (!threadId) return false;
+  const list = S.myComments || (S.myComments = []);
+  if (list.some(c => c.id === threadId)) return false;
+  list.unshift({ id: threadId, v: videoId || "", at: new Date().toISOString() });
+  S.myComments = list.slice(0, 50); save(); return true;
+}
+/* Link di un commento copiato dall'app di YouTube: ...watch?v=VIDEO&lc=ID_COMMENTO (o ID_DISCUSSIONE.ID_RISPOSTA) */
+function parseCommentLink(s){
+  const lc = (s.match(/[?&]lc=([\w-]+)(?:\.[\w-]+)?/) || [])[1] || (/^Ug[\w-]{10,}$/.test(s.trim()) ? s.trim() : "");
+  const v = (s.match(/(?:[?&]v=|youtu\.be\/|shorts\/)([\w-]{11})/) || [])[1] || "";
+  return lc ? { lc, v } : null;
+}
 const newNotifs = () => (S.notifs || []).filter(n => Date.parse(n.at) > S.seenNotif);
 function updateBell(){
   const n = newNotifs().length, b = $("#bellBadge");
@@ -984,15 +997,24 @@ async function loadNotifs(force){
 function renderNotifs(){
   const list = S.notifs || [], seen = S.nSeenShown || 0;
   const loggedOut = !S.myChId && !S.meData?.chan && !(S.myComments || []).length;
-  $("#nList").innerHTML = list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}">
+  $("#nList").innerHTML = followBox() + (list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}">
       <img class="avatar" loading="lazy" src="${esc(n.pic)}" alt="" style="width:36px;height:36px">
       <div style="flex:1"><div class="title" style="font-size:13.5px;-webkit-line-clamp:3"><b>${esc(n.who)}</b> ${n.k === "r" ? "ha risposto al tuo commento" : "ha commentato"} su “${esc(n.vt)}”: ${esc(n.text)}</div>
         <div class="sub">${ago(n.at)}</div></div>
       ${n.th ? `<img class="t" loading="lazy" src="${esc(n.th)}" alt="" style="width:86px">` : ""}</button>`).join("")
     : `<div class="empty"><p>${nBusy ? "Controllo i commenti…" : loggedOut
         ? "Accedi con Google per ricevere qui i commenti ai tuoi video e le risposte ai commenti che scrivi in YTG."
-        : "Nessuna notifica. Qui compaiono i commenti ai tuoi video e le risposte ai commenti che scrivi in YTG."}</p>
-      ${loggedOut && S.clientId ? `<div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button></div>` : ""}</div>`;
+        : "Nessuna notifica. Qui compaiono i commenti ai tuoi video e le risposte ai tuoi commenti, anche su video di altri."}</p>
+      ${loggedOut && S.clientId ? `<div class="row-btns"><button class="btn" data-act="login">Accedi con Google</button></div>` : ""}</div>`);
+}
+function followBox(){
+  const n = (S.myComments || []).length;
+  return `<div class="section" style="padding-top:4px">
+    <div class="panel"><form class="field" id="followForm" style="flex-wrap:wrap">
+      <input id="followIn" placeholder="Incolla il link di un tuo commento" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="btn" type="submit">Segui</button></form></div>
+    <div class="help" style="margin-top:6px">Per ricevere le risposte a un commento scritto nell'app di YouTube: nell'app tieni premuto il tuo commento (o tocca ⋯) → Condividi → Copia link, poi incollalo qui.
+      I commenti che scrivi in YTG, e quelli tuoi che trovi aprendo un video qui, vengono seguiti da soli.${n ? ` Commenti seguiti: ${n}.` : ""}</div></div>`;
 }
 function openNotifs(){
   S.nSeenShown = S.seenNotif || 0;
@@ -1351,6 +1373,12 @@ async function loadComments(first){
   try {
     const j = await api("commentThreads", { part: "snippet,replies", videoId: vid, maxResults: 20, order: "relevance", textFormat: "plainText", ...(cPage ? { pageToken: cPage } : {}) });
     if (current?.id !== vid) return;
+    const meId = S.myChId || S.meData?.chan?.id;
+    if (meId) for (const t of j.items || []) {
+      const mineTop = t.snippet.topLevelComment.snippet.authorChannelId?.value === meId;
+      const mineReply = (t.replies?.comments || []).some(r => r.snippet.authorChannelId?.value === meId);
+      if (mineTop || mineReply) followThread(t.id, vid);
+    }
     const html = (j.items || []).map(t => {
       const top = t.snippet.topLevelComment, n = t.snippet.totalReplyCount;
       const rep = n ? `<div class="replies" id="r_${t.id}"><button class="more" data-replies="${t.id}">Mostra ${n} rispost${n === 1 ? "a" : "e"}</button></div>` : "";
@@ -1785,6 +1813,13 @@ document.addEventListener("click", e => {
 document.addEventListener("submit", async e => {
   e.preventDefault();
   const id = e.target.id;
+  if (id === "followForm") {
+    const r = parseCommentLink($("#followIn").value);
+    if (!r) { toast("Non riconosco il link: deve contenere lc=…"); return; }
+    if (!followThread(r.lc, r.v)) { toast("Commento già seguito"); return; }
+    toast("Commento seguito: riceverai qui le risposte"); $("#followIn").value = "";
+    return loadNotifs(true);
+  }
   if (id === "sForm") { $("#sIn").blur(); return doSearch($("#sIn").value); }
   if (id === "cForm") { const txt = $("#cIn").value.trim(); if (txt && current) postComment(current, txt); return; }
   if (id === "keyForm") {
@@ -1865,7 +1900,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011071816";
+const BUILD = "20261011072031";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
