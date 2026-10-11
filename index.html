@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>YTG</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -36,6 +36,9 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;min-height:100%;overflow-x:hidden;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
 button,input,select,textarea{font:inherit;color:inherit}
+/* niente zoom: iPhone ingrandisce la pagina se un campo di testo ha caratteri sotto i 16px */
+html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+input,select,textarea{font-size:16px!important}
 button{cursor:pointer}
 [hidden]{display:none!important}
 a{color:var(--fg)}
@@ -1977,7 +1980,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011072424";
+const BUILD = "20261011072510";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1991,6 +1994,16 @@ async function checkUpdate(){
 }
 checkUpdate();
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
+/* ---------- blocca lo zoom con due dita e col doppio tocco ---------- */
+["gesturestart", "gesturechange", "gestureend"].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
+document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
+let lastTap = 0;
+document.addEventListener("touchend", e => {
+  const now = Date.now();
+  if (now - lastTap < 300 && !e.target.closest("input,textarea,select")) e.preventDefault();
+  lastTap = now;
+}, { passive: false });
 
 /* ---------- avvio ---------- */
 (async () => {
