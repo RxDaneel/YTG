@@ -643,8 +643,41 @@ function toVideo(v){
     views: +v.statistics?.viewCount || 0, likes: +v.statistics?.likeCount || 0, comments: +v.statistics?.commentCount || 0,
     thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "",
     desc: (v.snippet.description || "").slice(0, 200), cat: v.snippet.categoryId || "",
-    tags: (v.snippet.tags || []).slice(0, 8).map(t => t.toLowerCase()) };
+    tags: (v.snippet.tags || []).slice(0, 8).map(t => t.toLowerCase()),
+    lang: (v.snippet.defaultAudioLanguage || v.snippet.defaultLanguage || "").toLowerCase().slice(0, 5) };
 }
+/* Lingua di un video: "it", "en", "x" (altra lingua) o "" (non si capisce). Usa la lingua dichiarata dal canale e, se manca, il titolo. */
+const LW = {
+  it: "il gli della delle degli dello nel nella nei negli sono che non questo questa perché anche più ecco cosa tutto tutti ho abbiamo ma alla alle ai dei è sei siamo fatto nuovo nuova recensione guida primo prima ancora molto quando dove meglio migliore come provato",
+  en: "the and of to is how what why with my you your this for new best review guide i it on from first will can all about we are was my our vs ever just get made these that",
+  es: "el los las para cómo como qué por pero muy más mejor esto este esta hay también ya cuando sin y juego nueva todo todos así porque",
+  pt: "não você com uma os do da dos das mais isso muito jogo também melhor pra vocês",
+  fr: "les des du et est pour avec une dans pas sur ce cette je c'est nouveau meilleur au aux comment",
+  de: "der die das und ist mit nicht ein eine ich auf für wie den dem zu von auch neue besten"
+};
+const LSET = Object.fromEntries(Object.entries(LW).map(([k, s]) => [k, new Set(s.split(" "))]));
+const NONLATIN = /[Ͱ-ϿЀ-ԯ԰-֏֐-׿؀-ۿऀ-෿฀-๿ᄀ-ᇿ぀-ヿ㐀-鿿가-힯]/;
+const OTHERCH = /[ñ¿¡ãõçêâôßäöüğışłąężśćńřěůőűẞẠ-ỹ]/i, ACUTE = /[áíóú]/i;
+function textLang(text){
+  if (NONLATIN.test(text)) return "x";
+  const t = text.toLowerCase(), sc = { it: 0, en: 0, es: 0, pt: 0, fr: 0, de: 0 };
+  for (const w of t.split(/[^a-zà-ÿ']+/)) for (const k in LSET) if (LSET[k].has(w)) sc[k]++;
+  let other = Math.max(sc.es, sc.pt, sc.fr, sc.de);
+  if (OTHERCH.test(t)) other += 2;
+  if (ACUTE.test(t)) other += 1;
+  const mine = Math.max(sc.it, sc.en);
+  if (other >= 2 && other > mine) return "x";
+  if (mine && other <= mine) return sc.it > sc.en ? "it" : "en";
+  return other > mine ? "x" : "";
+}
+function videoLang(v){
+  const l = v.lang || "";
+  if (NONLATIN.test(v.title || "")) return "x";
+  if (/^(it|en)\b/.test(l)) return l.slice(0, 2);
+  if (l && !/^(zxx|und|mul)/.test(l)) return "x";
+  return textLang((v.title || "") + " " + (v.desc || "").slice(0, 120));
+}
+const langOk = v => videoLang(v) !== "x";
 async function pool(items, size, fn){
   const out = []; let i = 0;
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
@@ -939,7 +972,7 @@ async function loadHome(manual, noFetch, auto){
       for (const t of [T[k], T[(k + 1) % n]]) {
         if (searchCached(t, "h:")) continue;
         if (noFetch || fetched >= 1 || quotaOut() || (auto && T.some(x => searchCached(x, "h:")))) continue;   // al massimo una ricerca nuova; in automatico solo se non ce n'è nessuna di oggi
-        try { await searchVideos(t, 50, extra, "h:"); fetched++; } catch (e) { if (e.reason === "quotaExceeded") break; }
+        try { await searchVideos(t, 50, { ...extra, relevanceLanguage: topicLang(t) }, "h:"); fetched++; } catch (e) { if (e.reason === "quotaExceeded") break; }
       }
       for (const t of T) { const c = searchCached(t, "h:"); if (c) lists.push(c.map((v, i) => [v, 3 - i / 20])); }   // tutti i temi già cercati oggi, gratis
       S.homeMode = "foryou"; S.homeTags = T.slice(0, 8);
@@ -969,7 +1002,7 @@ async function loadHome(manual, noFetch, auto){
   finally { homeBusy = false; spin(false); rerender(); }
 }
 /* punteggio: pertinenza + gusti (tag, canali) + novità − video già mostrati in cima + un po' di casualità */
-function homeOk(v, p){ return !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0; }
+function homeOk(v, p){ return !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0 && langOk(v); }
 let vocabCache = null, vocabKey = "";
 function interestVocab(){
   const key = S.videos.length + ":" + S.likes.length + ":" + S.hist.length + ":" + S.nope.length + ":" + (S.myTopics || []).join("|") + ":" + S.mutedTopics.length;
@@ -1020,9 +1053,18 @@ function appendHome(ranked, max){
 }
 /* Canali che compaiono nelle ricerche sui tuoi temi, a cui non sei iscritto: i loro ultimi video sono quasi sempre in tema.
    2 unità per canale (lista + dettagli), poi restano salvati 24 ore. */
+/* in che lingua cercare un tema: quella in cui ne parlano di più i tuoi canali (italiano o inglese) */
+function topicLang(t){
+  const q = t.toLowerCase(); let it = 0, en = 0;
+  for (const v of S.videos) {
+    if (!(v.tags || []).includes(q) && !(v.title || "").toLowerCase().includes(q)) continue;
+    const l = videoLang(v); if (l === "it") it++; else if (l === "en") en++;
+  }
+  return it > en ? "it" : en > it ? "en" : (textLang(t) === "it" ? "it" : "en");
+}
 function discoveryChannels(p, T){
   const cnt = {};
-  for (const t of T) for (const v of searchCached(t, "h:") || []) if (!isSub(v.ch) && !S.blocked[v.ch] && (p.ch[v.ch] || 0) >= 0) cnt[v.ch] = (cnt[v.ch] || 0) + 1;
+  for (const t of T) for (const v of searchCached(t, "h:") || []) if (!isSub(v.ch) && !S.blocked[v.ch] && (p.ch[v.ch] || 0) >= 0 && langOk(v)) cnt[v.ch] = (cnt[v.ch] || 0) + 1;
   return Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]);
 }
 let homeShow = 30, moreBusy = false, homeMoreEnd = false;
@@ -1148,7 +1190,7 @@ const setupNeeded = () => !S.key
   ? `<div class="empty"><h2>Benvenuto in YTG</h2><p>Per iniziare aggiungi la chiave API di YouTube.</p><div class="row-btns"><button class="btn" data-go="vSettings">Aggiungi chiave API</button></div></div>` : "";
 
 /* ---------- viste ---------- */
-const homeList = () => S.home.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) && !S.hidden[x.id]);
+const homeList = () => S.home.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) && !S.hidden[x.id] && langOk(x));
 function renderHome(){
   const v = $("#vHome"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
   const list = homeList();
@@ -2406,7 +2448,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011192546";
+const BUILD = "20261011193154";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
