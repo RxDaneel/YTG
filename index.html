@@ -1980,7 +1980,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011072522";
+const BUILD = "20261011072714";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1999,6 +1999,18 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 ["gesturestart", "gesturechange", "gestureend"].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
 document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
 /* il doppio tocco è già bloccato da touch-action: manipulation, così i tocchi rapidi sui pulsanti (es. ≫ due volte) funzionano */
+/* se la pagina risulta comunque ingrandita (es. zoom rimasto dal browser), la riporto alla dimensione normale */
+const vpMeta = document.querySelector('meta[name="viewport"]'), VP = vpMeta.content;
+function resetZoom(){
+  const vv = window.visualViewport;
+  if (!vv || vv.scale <= 1.01) return;
+  vpMeta.content = VP.replace("initial-scale=1", "initial-scale=1.0001");
+  setTimeout(() => { vpMeta.content = VP; window.scrollTo(0, window.scrollY); }, 60);
+}
+window.visualViewport?.addEventListener("resize", () => setTimeout(resetZoom, 250));
+document.addEventListener("focusout", () => setTimeout(resetZoom, 150));
+addEventListener("pageshow", () => setTimeout(resetZoom, 300));
+setTimeout(resetZoom, 500);
 
 /* ---------- avvio ---------- */
 (async () => {
