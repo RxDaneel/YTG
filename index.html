@@ -483,7 +483,7 @@ function startLogin(after){
   const state = Math.random().toString(36).slice(2);
   try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: "token",
-    scope: SCOPE, include_granted_scopes: "true", state, ...(S.me ? {} : { prompt: "select_account" }) });
+    scope: SCOPE, include_granted_scopes: "true", state, ...(S.me && !after?.pick ? {} : { prompt: "select_account" }) });
   saveNow();
   location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + p;
 }
@@ -528,8 +528,15 @@ async function syncSubs(){
         thumb: s.snippet.thumbnails?.default?.url || "" });
       page = j.nextPageToken || "";
     } while (page);
+    if (!subs.length && S.channels.length) {
+      toast(c ? `${c.snippet.title} non ha iscrizioni: ho tenuto quelle di prima. Prova “Cambia account”.`
+              : "Questo account Google non ha un canale YouTube con iscrizioni. Tocca “Cambia account” e scegli quello giusto.");
+      return;
+    }
+    if (S.channels.length > 20 && subs.length < S.channels.length / 2) toast(`Attenzione: questo account ha ${subs.length} iscrizioni (prima erano ${S.channels.length}). Se non è giusto, usa “Cambia account”.`);
     const manual = S.channels.filter(c => c.manual && !subs.some(s => s.id === c.id));
     S.channels = subs.concat(manual);
+    S.myChId = c?.id || ""; S.meData = null; S.chMeta = S.chMeta || {};
     S.videos = S.videos.filter(v => S.channels.some(c => c.id === v.ch));
     try {
       const lk = await apiAuth("videos", { part: "snippet", myRating: "like", maxResults: 50 });
@@ -1011,7 +1018,9 @@ function renderSettings(){
       ${S.me ? `<img class="avatar" src="${esc(S.me.thumb)}" alt=""><span style="white-space:normal"><b>${esc(S.me.title)}</b><br><small style="color:var(--muted)">${S.channels.length} iscrizioni${S.lastSync ? " · sincronizzate " + ago(new Date(S.lastSync).toISOString()) : ""}</small></span>
         <button class="btn" data-act="sync">Sincronizza</button>`
       : `<span style="white-space:normal">Accedi con Google per caricare le tue iscrizioni, mettere Mi piace e commentare.</span><button class="btn" data-act="login">Accedi</button>`}
-    </div></div>
+    </div>
+    ${S.me ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="pickAccount">Cambia account<small>Scegli l'account Google e il canale con le tue iscrizioni</small></button>` : ""}
+    </div>
 
     <h2 style="margin-top:22px">Contenuti</h2>
     <div class="panel">
@@ -1052,6 +1061,15 @@ function renderSettings(){
       <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--danger)" data-act="reset">Cancella tutto</button>
     </div>
     <div class="status">${S.lastFetch ? "Iscrizioni aggiornate " + ago(new Date(S.lastFetch).toISOString()) : ""}</div>
+    <h2 style="margin-top:22px">Diagnostica</h2>
+    <div class="panel" style="padding:12px 14px"><div class="help" style="padding:0;font-variant-numeric:tabular-nums;line-height:1.7">
+      Versione ${esc(BUILD)} · ${idb ? "memoria completa" : "memoria ridotta"}<br>
+      Account: ${esc(S.me?.title || "nessuno")}${S.myChId ? " (canale ok)" : ""} · accesso ${tokenOk() ? "attivo" : "scaduto"}<br>
+      Chiave: …${esc((S.key || "").slice(-4))} · ID client: …${esc((S.clientId || "").split("-")[0].slice(-4))}<br>
+      Iscrizioni: ${S.channels.length} canali · ${Object.keys(S.chMeta || {}).length} controllati · ${S.videos.length} video<br>
+      Video più recente: ${S.videos[0] ? esc(ago(S.videos[0].at)) + " (" + esc(S.videos[0].chTitle) + ")" : "nessuno"}<br>
+      ${S.lastFail ? `Ultimo errore: ${S.lastFail.n}/${S.lastFail.of} canali · ${esc(S.lastFail.msg)}` : lastError ? "Ultimo errore: " + esc(lastError) : "Nessun errore recente"}
+    </div></div>
   </div>`;
 }
 
@@ -1714,11 +1732,13 @@ async function loadMe(manual){
   if (!tokenOk()) { if (manual) startLogin({ do: "me" }); return; }
   ME.busy = true; ME.err = ""; spin(true); renderMe();
   try {
+    const settle = p => p.then(v => v, e => { if (e.relogin) throw e; return { items: [], err: e }; });
     const [ch, pls, liked] = await Promise.all([
-      apiAuth("channels", { part: "snippet,contentDetails,statistics", mine: "true" }),
-      apiAuth("playlists", { part: "snippet,contentDetails,status", mine: "true", maxResults: 50 }),
-      apiAuth("videos", { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50 })
+      settle(apiAuth("channels", { part: "snippet,contentDetails,statistics", mine: "true" })),
+      settle(apiAuth("playlists", { part: "snippet,contentDetails,status", mine: "true", maxResults: 50 })),
+      settle(apiAuth("videos", { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50 }))
     ]);
+    if (!ch.items?.length) ME.err = "L'account con cui hai fatto l'accesso non ha un canale YouTube. In Impostazioni tocca “Cambia account” e scegli quello con le tue iscrizioni.";
     const c = ch.items?.[0];
     let uploads = [];
     const upId = c?.contentDetails?.relatedPlaylists?.uploads;
@@ -1773,7 +1793,7 @@ function renderMe(){
   v.innerHTML = head + `
     ${ME.err ? `<div class="status err" style="padding:0 16px">${esc(ME.err)}</div>` : ""}
     ${ME.busy && !d ? `<div class="status" style="padding:8px 16px">Carico il tuo profilo…</div>` : ""}
-    ${!d && !ME.busy || ME.err.startsWith("Accedi") ? loginCard : ""}
+    ${(!d && !ME.busy && !tokenOk()) || ME.err.startsWith("Accedi") ? loginCard : ""}
 
     ${hist.length ? `<div class="shead"><h3>Cronologia</h3><span class="sub">video aperti in YTG</span></div>
       <div class="hrow">${hist.map(hcard).join("")}</div>` : ""}
@@ -1889,6 +1909,7 @@ document.addEventListener("click", e => {
   }
   const a = t.dataset.act;
   if (a === "refresh") refresh(true);
+  if (a === "pickAccount") return startLogin({ do: "sync", pick: true });
   if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
   if (a === "login") startLogin({ do: "sync" });
@@ -2035,7 +2056,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011075805";
+const BUILD = "20261011080536";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
