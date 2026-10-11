@@ -630,7 +630,7 @@ const usedToday = () => S.qDay === qDay() ? S.qUsed || 0 : 0;
       più un piccolo controllo a rotazione di 4 canali, nel caso il contatore di YouTube sia in ritardo;
    3) si chiedono i dettagli solo dei video mai visti (1 unità ogni 50 video).
    Il primo aggiornamento scarica tutti i canali una volta sola. */
-async function refresh(manual){
+async function refresh(manual, full){
   if (busy) return;
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
   if (!S.channels.length) { if (manual) toast("Nessun canale: accedi o aggiungili dalla scheda Canali"); return; }
@@ -656,9 +656,20 @@ async function refresh(manual){
       return m.up && now - m.at > 2 * 3600000;                 // c'era una première in arrivo
     });
     const inChanged = new Set(changed.map(c => c.id));
-    const active = c => newest[c.id] && now - Date.parse(newest[c.id]) < 14 * 864e5;
-    const sweep = S.channels.filter(c => meta[c.id] && !inChanged.has(c.id) && now - meta[c.id].at > (active(c) ? 3 : 48) * 3600000)
-      .sort((a, b) => (active(b) - active(a)) || meta[a.id].at - meta[b.id].at).slice(0, 4);
+    // Il contatore dei video di YouTube a volte si aggiorna in ritardo: per questo ricontrollo direttamente
+    // i canali che pubblicano spesso, ogni volta che è passato circa il loro intervallo tipico tra due video.
+    const dates = {};
+    for (const v of S.videos) (dates[v.ch] || (dates[v.ch] = [])).push(Date.parse(v.at));
+    const gap = id => {
+      const d = (dates[id] || []).sort((a, b) => b - a);
+      if (d.length < 2) return 7 * 864e5;
+      const gaps = d.slice(0, 6).map((t, i, a) => i ? a[i - 1] - t : 0).slice(1).sort((a, b) => a - b);
+      return Math.min(14 * 864e5, Math.max(2 * 3600000, gaps[Math.floor(gaps.length / 2)]));
+    };
+    const due = c => (now - meta[c.id].at) / (gap(c.id) * (full ? 0 : 0.5) || 1);
+    const sweep = full ? S.channels.filter(c => !inChanged.has(c.id))
+      : S.channels.filter(c => meta[c.id] && !inChanged.has(c.id)).map(c => [due(c), c]).filter(x => x[0] >= 1)
+          .sort((a, b) => b[0] - a[0]).slice(0, 15).map(x => x[1]);
     const todo = changed.concat(sweep);
     let done = 0; progress(0, todo.length);
     const res = await pool(todo, 12, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
@@ -699,7 +710,8 @@ async function refresh(manual){
     S.videos = remember(keep.slice(0, 4000)); S.lastFetch = now; lastError = "";
     S.lastCost = usedToday() - u0; save();
     if (firstErr || res.some(r => r?.error)) toast("Alcuni canali non si sono aggiornati");
-    else if (manual) toast(`Iscrizioni aggiornate · ${S.lastCost} unità`);
+    else if (manual) toast(`Iscrizioni aggiornate · ${fresh.size} video nuovi · ${S.lastCost} unità`);
+    S.lastInfo = { checked: todo.length, fresh: fresh.size };
   } catch (e) { lastError = errMsg(e); toast(lastError); }
   finally { busy = false; spin(false); progress(0, 0); updateBell(); rerender(); }
 }
@@ -1001,7 +1013,7 @@ function renderSettings(){
       <div style="display:flex;justify-content:space-between;font-size:14px;font-variant-numeric:tabular-nums"><b>${(S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} usate</b><span style="color:var(--muted)">su 10.000</span></div>
       <div style="height:8px;border-radius:4px;background:var(--raised);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100, (S.qDay === qDay() ? S.qUsed || 0 : 0) / 100)}%;background:${quotaOut() ? "var(--danger)" : "var(--accent)"}"></div></div>
       <div class="help" style="padding:0">${quotaOut() ? "Unità finite per oggi. " : ""}Si azzerano ogni giorno alle 9:00. Conteggio stimato da questo telefono.<br>
-        ${S.lastCost != null ? `Ultimo aggiornamento delle iscrizioni: <b>${S.lastCost} unità</b>.<br>` : ""}
+        ${S.lastCost != null ? `Ultimo aggiornamento delle iscrizioni: <b>${S.lastCost} unità</b>${S.lastInfo ? `, ${S.lastInfo.checked} canali scaricati, ${S.lastInfo.fresh} video nuovi` : ""}.<br>` : ""}
         Costi indicativi: Iscrizioni ${Math.ceil(S.channels.length / 50) + 2}–${Math.ceil(S.channels.length / 50) + 20} (scarica solo i canali con video nuovi; il primo aggiornamento scarica tutto una volta) · Home 0–6 · aprire un video 2–4 · pagina di un canale 3 · ricerca 100, gratis se ripetuta entro 24 ore · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
     </div>
 
@@ -1020,7 +1032,8 @@ function renderSettings(){
 
     <h2 style="margin-top:22px">Dati</h2>
     <div class="panel">
-      <button class="toggle" style="width:100%;border:0;background:none;text-align:left" data-act="clearSeen">Azzera i video visti</button>
+      <button class="toggle" style="width:100%;border:0;background:none;text-align:left" data-act="fullRefresh">Ricontrolla tutti i canali delle iscrizioni (circa ${S.channels.length + Math.ceil(S.channels.length * S.opt.perChannel / 50)} unità)</button>
+      <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="clearSeen">Azzera i video visti</button>
       <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="clearTaste">Azzera i gusti della Home e i canali nascosti</button>
       <button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--danger)" data-act="reset">Cancella tutto</button>
     </div>
@@ -1860,6 +1873,7 @@ document.addEventListener("click", e => {
   }
   const a = t.dataset.act;
   if (a === "refresh") refresh(true);
+  if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
   if (a === "login") startLogin({ do: "sync" });
   if (a === "sync") syncSubs();
@@ -2005,7 +2019,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011074353";
+const BUILD = "20261011074918";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
