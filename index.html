@@ -921,7 +921,7 @@ async function loadHome(manual, noFetch){
   try {
     const { cats, p } = interests();
     const T = S.opt.homeSearch ? topics() : [];
-    const ok = v => !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0;
+    const ok = v => homeOk(v, p);
     const lists = [];
     if (T.length) {
       const n = T.length; let k = S.homePage._t || 0;
@@ -939,35 +939,88 @@ async function loadHome(manual, noFetch){
     }
     const favs = favChannels(p), pick = favs.length ? [0, 1].map(j => favs[((S.homePage._f || 0) + j) % favs.length]) : [];
     if (manual) S.homePage._f = (S.homePage._f || 0) + 2;
-    for (const l of await Promise.all([...new Set(pick)].map(id => channelLatest(id).catch(() => [])))) lists.push(l.map(v => [v, 1.5]));
+    // canali scoperti dalle ricerche sui tuoi temi: i primi 6 (quelli già scaricati oggi sono gratis)
+    const disc = noFetch ? discoveryChannels(p, T).filter(id => S.relCache["ch:" + id]) : discoveryChannels(p, T).slice(0, 6);
+    for (const l of await Promise.all([...new Set(pick.concat(disc))].map(id => channelLatest(id).catch(() => [])))) lists.push(l.map(v => [v, 1.5]));
+    disc.forEach(id => { if (S.relCache["ch:" + id]) S.relCache["ch:" + id].used = Date.now(); });
     if (!lists.some(l => l.some(([v]) => ok(v)))) {               // ancora nessun tema: classifiche, come prima
       const cs = cats.length ? cats : [""];
       for (const l of await Promise.all(cs.map(c => { const i = manual ? ((S.homePage[c || "all"] || 0) + 1) % 4 : (S.homePage[c || "all"] || 0); S.homePage[c || "all"] = i; return chartPage(c, i, false).catch(() => []); })))
         lists.push(l.map(v => [v, 0]));
       S.homeMode = T.length || cats.length ? "foryou" : "trend"; if (!T.length) S.homeTags = cats.map(c => CATS[c]);
     }
-    // punteggio: pertinenza della ricerca + gusti (tag, canali) + novità − video già mostrati in cima + un po' di casualità
-    const now = Date.now(), best = new Map();
-    for (const l of lists) for (const [v, base] of l) {
-      if (!ok(v)) continue;
-      let s = base + (p.ch[v.ch] || 0) * 1.2 + (p.cat[v.cat] || 0) * .15;
-      for (const t of v.tags || []) s += Math.max(-4, Math.min(4, p.tag[t] || 0)) * .6;
-      const days = (now - Date.parse(v.at)) / 864e5; if (days < 3) s += 1; else if (days < 21) s += .4;
-      s += -(S.homeSeen[v.id] || 0) * 2 + Math.random() * 1.5;
-      if (!best.has(v.id) || best.get(v.id)[0] < s) best.set(v.id, [s, v]);
-    }
-    const ranked = [...best.values()].filter(([s]) => s > -1).sort((a, b) => b[0] - a[0]).map(x => x[1]);
-    const perCh = {}, out = [];
-    for (const v of ranked) { if ((perCh[v.ch] = (perCh[v.ch] || 0) + 1) <= 2) out.push(v); if (out.length >= 60) break; }
-    out.slice(0, 15).forEach(v => S.homeSeen[v.id] = (S.homeSeen[v.id] || 0) + 1);
+    S.home = []; appendHome(rankHome(lists, p), 400);
+    homeShow = 30; homeMoreEnd = false; toTop();
+    S.home.slice(0, 15).forEach(v => S.homeSeen[v.id] = (S.homeSeen[v.id] || 0) + 1);
     const keys = Object.keys(S.homeSeen); if (keys.length > 3000) keys.slice(0, keys.length - 3000).forEach(k => delete S.homeSeen[k]);
-    S.home = remember(out);
     S.homeFetch = Date.now(); homeError = ""; save();
     if (manual) toast(`Home aggiornata · ${usedToday() - u0} unità`);
     ensureAvatars(S.home);
   } catch (e) { homeError = errMsg(e); toast(homeError); }
   finally { homeBusy = false; spin(false); rerender(); }
 }
+/* punteggio: pertinenza + gusti (tag, canali) + novità − video già mostrati in cima + un po' di casualità */
+function homeOk(v, p){ return !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0; }
+function rankHome(lists, p, skip){
+  const now = Date.now(), best = new Map();
+  for (const l of lists) for (const [v, base] of l) {
+    if (!homeOk(v, p) || skip?.has(v.id)) continue;
+    let s = base + (p.ch[v.ch] || 0) * 1.2 + (p.cat[v.cat] || 0) * .15;
+    for (const t of v.tags || []) s += Math.max(-4, Math.min(4, p.tag[t] || 0)) * .6;
+    const days = (now - Date.parse(v.at)) / 864e5; if (days < 3) s += 1; else if (days < 21) s += .4;
+    s += -(S.homeSeen[v.id] || 0) * 2 + Math.random() * 1.5;
+    if (!best.has(v.id) || best.get(v.id)[0] < s) best.set(v.id, [s, v]);
+  }
+  return [...best.values()].filter(([s]) => s > -1).sort((a, b) => b[0] - a[0]).map(x => x[1]);
+}
+/* aggiunge in fondo rispettando "massimo 3 video per canale" */
+function appendHome(ranked, max){
+  const per = {}; S.home.forEach(v => per[v.ch] = (per[v.ch] || 0) + 1);
+  const have = new Set(S.home.map(v => v.id)); let added = 0;
+  for (const v of ranked) {
+    if (have.has(v.id) || (per[v.ch] || 0) >= 3) continue;
+    per[v.ch] = (per[v.ch] || 0) + 1; S.home.push(v); have.add(v.id); added++;
+    if (S.home.length >= max) break;
+  }
+  remember(S.home); return added;
+}
+/* Canali che compaiono nelle ricerche sui tuoi temi, a cui non sei iscritto: i loro ultimi video sono quasi sempre in tema.
+   2 unità per canale (lista + dettagli), poi restano salvati 24 ore. */
+function discoveryChannels(p, T){
+  const cnt = {};
+  for (const t of T) for (const v of searchCached(t, "h:") || []) if (!isSub(v.ch) && !S.blocked[v.ch] && (p.ch[v.ch] || 0) >= 0) cnt[v.ch] = (cnt[v.ch] || 0) + 1;
+  return Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+let homeShow = 30, moreBusy = false, homeMoreEnd = false;
+async function moreHome(){
+  if (moreBusy || homeBusy) return;
+  const list = homeList();
+  if (homeShow < list.length) { homeShow += 20; return renderHome(); }      // prima mostro quelli già pronti, gratis
+  if (homeMoreEnd || !S.key || quotaOut()) return;
+  moreBusy = true; renderHome();
+  try {
+    const { cats, p } = interests(), T = S.opt.homeSearch ? topics() : [];
+    const have = new Set(S.home.map(v => v.id)), lists = [];
+    // 1) altri 5 canali scoperti dalle ricerche (circa 10 unità)
+    const disc = discoveryChannels(p, T).filter(id => !(S.relCache["ch:" + id]?.used));
+    const pick = disc.slice(0, 5);
+    for (const l of await Promise.all(pick.map(id => channelLatest(id).catch(() => [])))) lists.push(l.map(v => [v, 2]));
+    pick.forEach(id => { if (S.relCache["ch:" + id]) S.relCache["ch:" + id].used = Date.now(); });
+    // 2) se non bastano, la pagina successiva delle classifiche delle tue categorie (1 unità ciascuna), solo video in tema
+    if (!lists.some(l => l.some(([v]) => homeOk(v, p) && !have.has(v.id)))) {
+      for (const c of (cats.length ? cats : [""]).slice(0, 2)) {
+        const i = ((S.homePage["m" + c] ?? S.homePage[c || "all"] ?? 0) + 1) % 4; S.homePage["m" + c] = i;
+        const l = await chartPage(c, i, false).catch(() => []);
+        lists.push(l.filter(v => (v.tags || []).some(t => (p.tag[t] || 0) > 0) || (p.ch[v.ch] || 0) > 0 || (T.length === 0)).map(v => [v, 0]));
+      }
+    }
+    const added = appendHome(rankHome(lists, p, have), 400);
+    if (!added) homeMoreEnd = true;
+    homeShow += 20; save(); ensureAvatars(S.home);
+  } catch (e) { toast(errMsg(e)); }
+  finally { moreBusy = false; renderHome(); }
+}
+
 function muteTopic(t){
   if (!S.mutedTopics.includes(t)) S.mutedTopics.push(t);
   S.homeTags = S.homeTags.filter(x => x !== t); save();
@@ -1062,9 +1115,10 @@ const setupNeeded = () => !S.key
   ? `<div class="empty"><h2>Benvenuto in YTG</h2><p>Per iniziare aggiungi la chiave API di YouTube.</p><div class="row-btns"><button class="btn" data-go="vSettings">Aggiungi chiave API</button></div></div>` : "";
 
 /* ---------- viste ---------- */
+const homeList = () => S.home.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) && !S.hidden[x.id]);
 function renderHome(){
   const v = $("#vHome"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
-  const list = S.home.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) && !S.hidden[x.id]);
+  const list = homeList();
   if (!list.length) {
     v.innerHTML = `<div class="empty"><h2>${homeBusy ? "Preparo la tua Home…" : "Home vuota"}</h2>
       ${homeError ? `<p class="status err">Errore: ${esc(homeError)}</p>` : ""}
@@ -1075,8 +1129,17 @@ function renderHome(){
     ? `<div class="group">Per te</div><div class="chips">${S.homeTags.map(t => `<span class="chip"><button class="chipq" data-q="${esc(t)}">${esc(t)}</button><button class="chipx" data-mute="${esc(t)}" aria-label="Togli ${esc(t)}">×</button></span>`).join("")}</div>`
     : `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>
        <div class="help" style="padding:0 16px 12px">Metti like ai video su YouTube o guardane qualcuno qui: la Home imparerà i tuoi gusti.${S.me ? "" : " Accedi con Google per usare anche i tuoi like."}</div>`;
-  v.innerHTML = head + list.map(x => card(x, true)).join("");
+  const shown = list.slice(0, homeShow);
+  const tail = moreBusy ? `<div class="status" style="padding:16px;text-align:center">Carico altri video…</div>`
+    : shown.length < list.length || !homeMoreEnd ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="homeMore" style="font-size:13px;padding:8px 14px">Altri video</button></div>`
+    : `<div class="status" style="padding:16px;text-align:center">Per ora è tutto: trascina in basso per aggiornare.</div>`;
+  v.innerHTML = head + shown.map(x => card(x, true)).join("") + tail;
 }
+/* arrivando in fondo alla Home se ne caricano altri da soli */
+document.getElementById("main").addEventListener("scroll", e => {
+  const m = e.currentTarget;
+  if (tab === "vHome" && m.scrollTop + m.clientHeight > m.scrollHeight - 900) moreHome();
+}, { passive: true });
 
 function renderSubs(){
   const v = $("#vSubs"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
@@ -2068,6 +2131,7 @@ document.addEventListener("click", e => {
   if (a === "unmuteAll") { S.mutedTopics = []; save(); renderSettings(); return toast("Temi rimessi"); }
   if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
+  if (a === "homeMore") moreHome();
   if (a === "login") reauth({ do: "sync" });
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
@@ -2217,7 +2281,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011095941";
+const BUILD = "20261011100654";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
