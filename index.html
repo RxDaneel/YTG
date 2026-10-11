@@ -1980,7 +1980,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011072510";
+const BUILD = "20261011072522";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -1998,12 +1998,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 /* ---------- blocca lo zoom con due dita e col doppio tocco ---------- */
 ["gesturestart", "gesturechange", "gestureend"].forEach(ev => document.addEventListener(ev, e => e.preventDefault(), { passive: false }));
 document.addEventListener("touchmove", e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
-let lastTap = 0;
-document.addEventListener("touchend", e => {
-  const now = Date.now();
-  if (now - lastTap < 300 && !e.target.closest("input,textarea,select")) e.preventDefault();
-  lastTap = now;
-}, { passive: false });
+/* il doppio tocco è già bloccato da touch-action: manipulation, così i tocchi rapidi sui pulsanti (es. ≫ due volte) funzionano */
 
 /* ---------- avvio ---------- */
 (async () => {
