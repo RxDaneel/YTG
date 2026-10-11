@@ -672,8 +672,16 @@ async function refresh(manual, full){
           .sort((a, b) => b[0] - a[0]).slice(0, 15).map(x => x[1]);
     const todo = changed.concat(sweep);
     let done = 0; progress(0, todo.length);
-    const res = await pool(todo, 12, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
-    if (todo.length && res.every(r => r?.error)) throw res[0].error;
+    const res = await pool(todo, 8, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
+    // riprova piano i canali che non hanno risposto (a volte YouTube rifiuta troppe richieste insieme)
+    const retry = res.map((r, i) => r?.error && !quotaOut() ? i : -1).filter(i => i >= 0);
+    if (retry.length) {
+      const again = await pool(retry, 2, i => channelUploads(todo[i]));
+      retry.forEach((i, k) => { if (again[k] && !again[k].error) res[i] = again[k]; });
+    }
+    const fails = res.filter(r => r?.error);
+    S.lastFail = fails.length ? { n: fails.length, of: todo.length, msg: errMsg(fails[0].error), at: now } : null;
+    if (todo.length && fails.length === todo.length) throw fails[0].error;
 
     // 3) dettagli solo dei video nuovi (e delle dirette, per sapere se sono finite)
     const known = new Map(S.videos.map(v => [v.id, v]));
@@ -709,7 +717,8 @@ async function refresh(manual, full){
     if (!S.seenNotif) S.seenNotif = keep[0] ? Date.parse(keep[0].at) : now;
     S.videos = remember(keep.slice(0, 4000)); S.lastFetch = now; lastError = "";
     S.lastCost = usedToday() - u0; save();
-    if (firstErr || res.some(r => r?.error)) toast("Alcuni canali non si sono aggiornati");
+    if (S.lastFail) toast(`${S.lastFail.n} canali su ${S.lastFail.of} non hanno risposto: ${S.lastFail.msg}`);
+    else if (firstErr) toast("Alcuni canali non si sono aggiornati: " + errMsg(firstErr));
     else if (manual) toast(`Iscrizioni aggiornate · ${fresh.size} video nuovi · ${S.lastCost} unità`);
     S.lastInfo = { checked: todo.length, fresh: fresh.size };
   } catch (e) { lastError = errMsg(e); toast(lastError); }
@@ -939,7 +948,9 @@ function renderSubs(){
       ${busy || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica i video</button></div>`}</div>`;
     return;
   }
-  let html = "", last = "";
+  let html = S.lastFail ? `<div class="panel" style="margin:12px 16px 0;padding:12px"><div class="help" style="padding:0;color:var(--danger)">
+      All'ultimo aggiornamento ${S.lastFail.n} canali su ${S.lastFail.of} non hanno risposto (${esc(S.lastFail.msg)}), quindi i loro video più recenti potrebbero mancare.</div>
+      <div style="margin-top:8px"><button class="btn ghost" data-act="refresh" style="padding:7px 12px;font-size:13px">Riprova</button></div></div>` : "", last = "";
   for (const x of list) {
     const b = bucket(x.at);
     if (b !== last) { html += `<div class="group">${b}</div>`; last = b; }
@@ -2019,7 +2030,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011074918";
+const BUILD = "20261011075217";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
