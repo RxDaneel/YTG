@@ -1853,7 +1853,7 @@ function renderMyPlaylist(){
 
 /* ---------- navigazione ---------- */
 const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni", vMe: "Tu" };
-const LABEL = t => t === "vHome" ? "" : TITLES[t];
+const LABEL = t => ["vHome", "vSubs", "vMe"].includes(t) ? "" : TITLES[t];   // le schede della barra in basso non ripetono il nome in alto
 function progress(done, total){ $("#hTitle").textContent = total && tab === "vSubs" ? `Aggiorno ${done}/${total}` : LABEL(tab); }
 function rerender(){
   if (tab === "vHome") renderHome(); else if (tab === "vSubs") renderSubs();
@@ -2061,7 +2061,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011081003";
+const BUILD = "20261011083629";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
