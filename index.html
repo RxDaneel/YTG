@@ -73,6 +73,11 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 
 .group{padding:18px 16px 8px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .card{display:block;width:100%;text-align:left;border:0;background:none;padding:0 0 20px}
+.cwrap{position:relative}
+.cwrap .meta{padding-right:44px}
+.cdots{position:absolute;right:6px;bottom:22px;width:36px;height:40px;border:0;background:none;border-radius:50%;display:grid;place-items:center;color:var(--fg)}
+.cdots:active{background:var(--raised)}
+.cdots svg{width:20px;height:20px;fill:currentColor}
 .thumb{position:relative;aspect-ratio:16/9;background:var(--surface);overflow:hidden;max-width:100%}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .dur{position:absolute;right:8px;bottom:8px;background:rgba(20,20,19,.82);color:#faf9f5;font-size:12px;font-weight:600;padding:2px 5px;border-radius:4px;font-variant-numeric:tabular-nums}
@@ -349,14 +354,14 @@ const S = Object.assign({
   key: "", clientId: "", token: "", tokenExp: 0, tokenScope: "", me: null, lastSync: 0,
   channels: [], videos: [], lastFetch: 0, watched: {}, avatars: {}, noLF: {},
   home: [], homeFetch: 0, homeMode: "", homeTags: [], seenNotif: 0, likes: [], hist: [], blocked: {},
-  chMeta: {}, sCache: {}, relCache: {}, lastCost: null
+  chMeta: {}, sCache: {}, relCache: {}, lastCost: null, nope: [], hidden: {}, homeSeen: {}, homePage: {}, chartTok: {}
 }, load());
 S.opt = Object.assign({}, DEF_OPT, S.opt || {});
 function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch { return {}; } }
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -386,6 +391,8 @@ async function loadBig(){
   if (idb) for (const k of BIG) { const v = await idbGet(k); if (v !== undefined && v !== null) S[k] = v; }
   for (const k of ["chMeta", "sCache", "relCache", "avatars"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
   if (!Array.isArray(S.later)) S.later = [];
+  for (const k of ["hidden", "homeSeen", "homePage", "chartTok"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
+  if (!Array.isArray(S.nope)) S.nope = [];
   bigReady = true;
 }
 function save(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 400); }
@@ -672,15 +679,22 @@ async function refresh(manual){
 
 /* Video popolari per categoria: servono sia alla Home sia ai "Video simili".
    Restano in memoria 3 ore, così aprire video o tornare in Home non costa nulla. */
-async function catChart(c, force){
-  const key = S.opt.region + ":" + (c || "all"), rc = S.relCache;
-  if (!force && rc[key] && Date.now() - rc[key].at < 3 * 3600000) return remember(rc[key].list);
-  const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50, ...(c ? { videoCategoryId: c } : {}) });
+/* Le classifiche di YouTube hanno fino a 4 pagine da 50 video: ogni aggiornamento manuale della Home passa alla pagina successiva. */
+async function chartPage(c, idx, force){
+  const key = S.opt.region + ":" + (c || "all"), T = S.chartTok[key] || (S.chartTok[key] = []);
+  if (idx && !T[idx]) { try { await chartPage(c, idx - 1, true); } catch {} }   // serve il "segnalibro" della pagina prima
+  if (idx && !T[idx]) idx = 0;
+  const ck = key + ":" + idx, rc = S.relCache;
+  if (!force && rc[ck] && Date.now() - rc[ck].at < 3 * 3600000) return remember(rc[ck].list);
+  const j = await api("videos", { part: "snippet,contentDetails,statistics", chart: "mostPopular", regionCode: S.opt.region, maxResults: 50,
+    ...(c ? { videoCategoryId: c } : {}), ...(idx ? { pageToken: T[idx] } : {}) });
+  if (j.nextPageToken) T[idx + 1] = j.nextPageToken;
   const list = remember((j.items || []).filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo));
-  rc[key] = { at: Date.now(), list };
+  rc[ck] = { at: Date.now(), list };
   for (const k of Object.keys(rc)) if (Date.now() - rc[k].at > 24 * 3600000) delete rc[k];
   save(); return list;
 }
+const catChart = (c, force) => chartPage(c, 0, force);
 
 /* Ricerca su YouTube: 100 unità, fisse per Google. La stessa ricerca ripetuta entro 24 ore è gratis. */
 async function searchVideos(q, max){
@@ -703,45 +717,101 @@ async function searchVideos(q, max){
 const CATS = { "1":"Film e animazione","2":"Motori","10":"Musica","15":"Animali","17":"Sport","19":"Viaggi","20":"Videogiochi",
   "22":"Persone e blog","23":"Comicità","24":"Intrattenimento","25":"Notizie","26":"Stile e consigli","27":"Istruzione","28":"Scienza e tecnologia","29":"Attivismo" };
 const STOP = new Set(["video","youtube","shorts","short","new","2024","2025","2026","official","ita","italia","italiano","the","and","di","il","la","e"]);
-function interests(){
-  const cat = {}, tag = {}, chNames = new Set(S.channels.map(c => c.title.toLowerCase()));
-  const add = (v, w) => {
+/* Profilo dei gusti: like (+3), video guardati in YTG (+2), video delle iscrizioni (+0,25),
+   "Non mi interessa" (canale −6, tag −2, categoria −1). */
+function profile(){
+  const cat = {}, tag = {}, ch = {}, chNames = new Set(S.channels.map(c => c.title.toLowerCase()));
+  const add = (v, w, wc = w) => {
     if (!v) return;
-    if (v.cat && CATS[v.cat]) cat[v.cat] = (cat[v.cat] || 0) + w;
+    if (v.cat && CATS[v.cat]) cat[v.cat] = (cat[v.cat] || 0) + wc;
+    if (v.ch) ch[v.ch] = (ch[v.ch] || 0) + w;
     for (const t of new Set(v.tags || [])) if (t.length > 2 && t.length < 32 && !STOP.has(t) && !chNames.has(t)) tag[t] = (tag[t] || 0) + w;
   };
   S.likes.forEach(v => add(v, 3)); S.hist.forEach(v => add(v, 2)); S.videos.slice(0, 200).forEach(v => add(v, .25));
-  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(x => x[0]);
-  return { cats: top(cat).slice(0, 4), tags: top(tag).filter(t => tag[t] >= 2).slice(0, 4) };
+  S.nope.forEach(v => { if (v.ch) ch[v.ch] = (ch[v.ch] || 0) - 6; add({ cat: v.cat, tags: v.tags }, -2, -1); });
+  return { cat, tag, ch };
+}
+function interests(){
+  const p = profile(), top = o => Object.entries(o).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  return { cats: top(p.cat).slice(0, 4), tags: top(p.tag).filter(t => p.tag[t] >= 2).slice(0, 4), p };
 }
 function interleave(lists){
   const out = [], seen = new Set(); let i = 0, more = true;
   while (more) { more = false; for (const l of lists) if (i < l.length) { more = true; const v = l[i]; if (!seen.has(v.id)) { seen.add(v.id); out.push(v); } } i++; }
   return out;
 }
+/* Canali che guardi o a cui metti like ma a cui non sei iscritto: i loro ultimi video entrano nella Home. */
+function favChannels(p){
+  return Object.entries(p.ch).filter(([id, w]) => w >= 2 && !isSub(id) && !S.blocked[id]).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8);
+}
+async function channelLatest(id){
+  const key = "ch:" + id, rc = S.relCache;
+  if (rc[key] && Date.now() - rc[key].at < 12 * 3600000) return remember(rc[key].list);
+  const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + id.slice(2), maxResults: 10 });
+  const ids = (j.items || []).map(i => i.contentDetails.videoId);
+  const list = ids.length ? remember((await videoDetails(ids)).filter(v => v.snippet.liveBroadcastContent !== "upcoming").map(toVideo)) : [];
+  rc[key] = { at: Date.now(), list }; save(); return list;
+}
 async function loadHome(manual){
   if (homeBusy || !S.key) return;
   homeBusy = true; spin(true); rerender();
+  const u0 = usedToday();
   try {
-    const { cats, tags } = interests();
-    const ok = v => !S.watched[v.id] && !S.blocked[v.ch];
-    let lists = [];
-    if (cats.length || tags.length) {
-      const jobs = cats.map(c => catChart(c, manual).catch(() => []));
-      lists = (await Promise.all(jobs)).map(l => l.filter(ok));
+    const { cats, tags, p } = interests();
+    const ok = v => !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch);
+    let pool = [];
+    if (cats.length) {
+      const pages = cats.map(c => { const i = manual ? ((S.homePage[c] || 0) + 1) % 4 : (S.homePage[c] || 0); S.homePage[c] = i; return [c, i]; });
+      const favs = favChannels(p), pick = favs.length ? [0, 1, 2].map(k => favs[((S.homePage._f || 0) + k) % favs.length]) : [];
+      if (manual) S.homePage._f = (S.homePage._f || 0) + 3;
+      const lists = await Promise.all([
+        ...pages.map(([c, i]) => chartPage(c, i, false).catch(() => [])),
+        ...[...new Set(pick)].map(id => channelLatest(id).catch(() => []))
+      ]);
+      pool = lists.flat();
       S.homeMode = "foryou"; S.homeTags = cats.map(c => CATS[c]).concat(tags);
     }
-    if (!lists.some(l => l.length)) {
-      lists = [(await catChart("", manual)).filter(ok)];
+    if (!pool.filter(ok).length) {
+      const i = manual ? ((S.homePage.all || 0) + 1) % 4 : (S.homePage.all || 0); S.homePage.all = i;
+      pool = await chartPage("", i, false);
       S.homeMode = "trend"; S.homeTags = [];
     }
-    S.home = remember(interleave(lists).slice(0, 60));
+    // punteggio: gusti + novità − video già mostrati + un po' di casualità, così ogni aggiornamento cambia
+    const seen = new Set(), now = Date.now();
+    const score = v => {
+      let s = (p.cat[v.cat] || 0) * .4 + (p.ch[v.ch] || 0) * 1.2;
+      for (const t of v.tags || []) s += Math.max(-4, Math.min(4, p.tag[t] || 0)) * .8;
+      const days = (now - Date.parse(v.at)) / 864e5; if (days < 3) s += 1.5; else if (days < 14) s += .5;
+      return s - (S.homeSeen[v.id] || 0) * 2.5 + Math.random() * 3;
+    };
+    const ranked = pool.filter(v => ok(v) && !seen.has(v.id) && seen.add(v.id)).map(v => [score(v), v]).sort((a, b) => b[0] - a[0]).map(x => x[1]);
+    const perCh = {}, out = [];
+    for (const v of ranked) { if ((perCh[v.ch] = (perCh[v.ch] || 0) + 1) <= 2) out.push(v); if (out.length >= 60) break; }
+    out.slice(0, 15).forEach(v => S.homeSeen[v.id] = (S.homeSeen[v.id] || 0) + 1);
+    const keys = Object.keys(S.homeSeen); if (keys.length > 3000) keys.slice(0, keys.length - 3000).forEach(k => delete S.homeSeen[k]);
+    S.home = remember(out);
     S.homeFetch = Date.now(); homeError = ""; save();
-    if (manual) toast("Home aggiornata");
+    if (manual) toast(`Home aggiornata · ${usedToday() - u0} unità`);
     ensureAvatars(S.home);
   } catch (e) { homeError = errMsg(e); toast(homeError); }
   finally { homeBusy = false; spin(false); rerender(); }
 }
+
+/* "Non mi interessa": il video sparisce e i suoi segnali (canale, tag, categoria) pesano in negativo */
+function notInterested(v){
+  if (!v) return;
+  S.hidden[v.id] = 1;
+  S.nope = [{ cat: v.cat, ch: v.ch, tags: (v.tags || []).slice(0, 8) }].concat(S.nope).slice(0, 300);
+  S.home = S.home.filter(x => x.id !== v.id); save(); rerender();
+  toast("Ok, vedrai meno video come questo");
+}
+function cardMenu(id){
+  const v = CACHE.get(id); if (!v) return;
+  menuVideo = v;
+  showMenu([["mNope", "Non mi interessa"], ["mBlock", "Non consigliare il canale"],
+    [inLater(id) ? "mUnlater" : "mLater", inLater(id) ? "Rimuovi da Guarda più tardi" : "Salva in Guarda più tardi"], ["closeMenu", "Annulla"]]);
+}
+let menuVideo = null;
 
 /* Ricerca su tutto YouTube (costa 100 unità di quota a ricerca) */
 async function doSearch(q){
@@ -785,8 +855,9 @@ function bucket(iso){
   return "Più vecchi";
 }
 
-function card(x){
+function card(x, menu){
   const bits = [esc(x.chTitle), x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ");
+  if (menu === true) return `<div class="cwrap">${card(x)}<button class="cdots" data-cm="${x.id}" aria-label="Altre azioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button></div>`;
   return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
     <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
       ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
@@ -800,7 +871,7 @@ const setupNeeded = () => !S.key
 /* ---------- viste ---------- */
 function renderHome(){
   const v = $("#vHome"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
-  const list = S.home.filter(x => !S.opt.hideWatched || !S.watched[x.id]);
+  const list = S.home.filter(x => (!S.opt.hideWatched || !S.watched[x.id]) && !S.hidden[x.id]);
   if (!list.length) {
     v.innerHTML = `<div class="empty"><h2>${homeBusy ? "Preparo la tua Home…" : "Home vuota"}</h2>
       ${homeError ? `<p class="status err">Errore: ${esc(homeError)}</p>` : ""}
@@ -811,7 +882,7 @@ function renderHome(){
     ? `<div class="group">Per te</div><div class="chips">${S.homeTags.map(t => `<button class="chip" data-q="${esc(t)}">${esc(t)}</button>`).join("")}</div>`
     : `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>
        <div class="help" style="padding:0 16px 12px">Metti like ai video su YouTube o guardane qualcuno qui: la Home imparerà i tuoi gusti.${S.me ? "" : " Accedi con Google per usare anche i tuoi like."}</div>`;
-  v.innerHTML = head + list.map(card).join("");
+  v.innerHTML = head + list.map(x => card(x, true)).join("");
 }
 
 function renderSubs(){
@@ -1354,7 +1425,7 @@ function toggleLater(v, on){
 function videoMenu(){
   const items = [[inLater(current.id) ? "unlaterCur" : "laterCur", inLater(current.id) ? "Rimuovi da Guarda più tardi" : "Salva in Guarda più tardi"],
     ["copyLink", "Copia link"], ["openYT", "Apri nel browser"]];
-  if (!isSub(current.ch)) items.push(["block", "Non mi interessa questo canale"]);
+  if (!isSub(current.ch)) items.push(["nopeCur", "Non mi interessa questo video"], ["block", "Non consigliare il canale"]);
   items.push(["closeMenu", "Annulla"]);
   showMenu(items);
 }
@@ -1738,7 +1809,8 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-nv],[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  const t = e.target.closest("[data-cm],[data-nv],[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
+  if (t.dataset.cm) return cardMenu(t.dataset.cm);
   if (t.dataset.nv) {
     const v = CACHE.get(t.dataset.nv); if (!v) return toast("Video non disponibile");
     closeSheet("#notifs"); openVideo(v.id);
@@ -1775,6 +1847,11 @@ document.addEventListener("click", e => {
   if (a === "share") shareVideo();
   if (a === "vmenu") videoMenu();
   if (a === "closeMenu") closeMenu();
+  if (a === "mNope") { closeMenu(); return notInterested(menuVideo); }
+  if (a === "mBlock" && menuVideo) { closeMenu(); S.blocked[menuVideo.ch] = 1; S.home = S.home.filter(v => v.ch !== menuVideo.ch); save(); rerender(); return toast(`Non vedrai più ${menuVideo.chTitle} nella Home`); }
+  if (a === "mLater") { closeMenu(); return toggleLater(menuVideo, true); }
+  if (a === "mUnlater") { closeMenu(); return toggleLater(menuVideo, false); }
+  if (a === "nopeCur") { closeMenu(); notInterested(current); return closeSheet("#player"); }
   if (a === "laterCur") { closeMenu(); return toggleLater(current, true); }
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
@@ -1801,7 +1878,7 @@ document.addEventListener("click", e => {
     closeMenu(); toast(`Non vedrai più ${current.chTitle} nella Home`); rerender();
   }
   if (a === "desc") { const d = $("#vDesc"); d.hidden = !d.hidden; t.textContent = d.hidden ? "…altro" : "meno"; }
-  if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
+  if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.nope = []; S.hidden = {}; S.homeSeen = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
   if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
   if (a === "reset") {
     if (!resetArmed) { resetArmed = true; t.textContent = "Tocca di nuovo per confermare"; setTimeout(() => { resetArmed = false; if (t.isConnected) t.textContent = "Cancella tutto"; }, 4000); return; }
@@ -1900,7 +1977,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011072031";
+const BUILD = "20261011072424";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
