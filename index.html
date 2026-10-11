@@ -51,6 +51,12 @@ header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space
 .logo{border:0;background:none;padding:2px 4px 2px 0;font:900 24px/1 var(--font);letter-spacing:-.04em;color:var(--fg);flex:none}
 .logo:active{opacity:.6}
 #hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+/* barretta delle unità usate oggi, in cima alla barra */
+#qbar{position:absolute;left:0;right:0;top:var(--top);height:12px;border:0;padding:0;background:none;cursor:pointer}
+#qbar::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--line)}
+#qfill{position:absolute;left:0;top:0;height:3px;width:0;background:var(--muted);transition:width .4s ease,background .4s}
+#qfill.warn{background:var(--fg)}
+#qfill.out{background:var(--danger)}
 .icon-btn{position:relative;width:40px;height:40px;border-radius:50%;border:0;background:transparent;display:grid;place-items:center;color:var(--fg);text-decoration:none}
 .icon-btn:active{background:var(--raised)}
 .icon-btn.on{background:var(--raised)}
@@ -264,6 +270,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <body>
 
 <header>
+  <button id="qbar" data-act="qinfo" aria-label="Unità usate oggi"><i id="qfill"></i></button>
   <h1><button class="logo" id="logo" aria-label="YT-, vai alla Home">YT-</button><span id="hTitle"></span></h1>
   <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
@@ -433,9 +440,17 @@ function spend(path, method){
   const cost = path.startsWith("search") ? 100 : (method && method !== "GET") ? 50 : 1;
   const d = qDay(); if (S.qDay !== d) { S.qDay = d; S.qUsed = 0; S.quotaOut = ""; }
   S.qUsed = (S.qUsed || 0) + cost;
+  paintQuota();
+}
+function paintQuota(){
+  const f = document.getElementById("qfill"); if (!f) return;
+  const used = S.qDay === qDay() ? S.qUsed || 0 : 0, out = S.quotaOut === qDay();
+  f.style.width = (out ? 100 : Math.min(100, used / 100)) + "%";
+  f.classList.toggle("warn", !out && used >= 7000);
+  f.classList.toggle("out", out);
 }
 const quotaOut = () => S.quotaOut === qDay();
-function markQuota(e){ if (e?.reason === "quotaExceeded") { S.quotaOut = qDay(); save(); } }
+function markQuota(e){ if (e?.reason === "quotaExceeded") { S.quotaOut = qDay(); save(); paintQuota(); } }
 
 async function api(path, params){
   if (!S.key) throw new Error("Manca la chiave API: aggiungila in Impostazioni.");
@@ -1850,6 +1865,7 @@ document.addEventListener("click", e => {
   if (a === "share") shareVideo();
   if (a === "vmenu") videoMenu();
   if (a === "closeMenu") closeMenu();
+  if (a === "qinfo") { const u = S.qDay === qDay() ? S.qUsed || 0 : 0; return toast(quotaOut() ? "Unità finite per oggi: tornano alle 9:00" : `Oggi: ${u.toLocaleString("it-IT")} unità su 10.000 · si azzerano alle 9:00`); }
   if (a === "mNope") { closeMenu(); return notInterested(menuVideo); }
   if (a === "mBlock" && menuVideo) { closeMenu(); S.blocked[menuVideo.ch] = 1; S.home = S.home.filter(v => v.ch !== menuVideo.ch); save(); rerender(); return toast(`Non vedrai più ${menuVideo.chTitle} nella Home`); }
   if (a === "mLater") { closeMenu(); return toggleLater(menuVideo, true); }
@@ -1980,7 +1996,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011072714";
+const BUILD = "20261011073114";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -2031,7 +2047,7 @@ if (after?.do === "comment") {
   else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
 } else if (after) { go("vSettings"); syncSubs(); }
 else go(S.opt.showHome ? "vHome" : "vSubs");
-updateBell(); setTimeout(() => loadNotifs(), 2500);
+updateBell(); paintQuota(); setInterval(paintQuota, 60000); setTimeout(() => loadNotifs(), 2500);
 if (!after && S.channels.length && !quotaOut() && Date.now() - S.lastFetch > 60 * 60000 && tab !== "vSubs") refresh();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
