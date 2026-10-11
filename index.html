@@ -273,6 +273,9 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #ptr.back{transition:transform .25s ease,opacity .25s ease}
 /* player di YouTube con i suoi comandi: la barra di YTG e lo strato per mostrarla sono nascosti */
 #pCtl,.reveal{display:none!important}
+/* gesto "indietro": trascina dal bordo sinistro verso destra per chiudere la pagina aperta */
+#edge{position:fixed;left:0;top:0;bottom:0;width:16px;z-index:9999;touch-action:none}
+.sheet.dragging{box-shadow:-10px 0 30px rgba(0,0,0,.45)}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}.spin svg{animation:none}}
 </style>
 </head>
@@ -303,6 +306,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <button data-tab="vMe"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4 20.5c1.2-4 4.3-6 8-6s6.8 2 8 6"/></svg>Tu</button>
 </nav>
 
+<div id="edge" hidden aria-hidden="true"></div>
 <div class="sheet" id="player" aria-hidden="true">
   <div class="pbar">
     <button class="icon-btn" id="pClose" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
@@ -1489,15 +1493,63 @@ screen.orientation?.addEventListener?.("change", () => setTimeout(applyLand, 300
 applyLand();
 let current = null, cPage = "";
 let zTop = 40;
-function openSheet(sel){ const p = $(sel); p.style.zIndex = ++zTop; p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; }
+const syncEdge = () => { $("#edge").hidden = !document.querySelector(".sheet.open"); };
+function openSheet(sel){ const p = $(sel); p.style.zIndex = ++zTop; p.classList.add("open"); p.setAttribute("aria-hidden", "false"); p.scrollTop = 0; syncEdge(); }
 function closeSheet(sel){
-  const p = $(sel); p.classList.remove("open"); p.setAttribute("aria-hidden", "true");
+  const p = $(sel); p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); syncEdge();
   if (sel === "#player") setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
 }
 function closeSheets(){
   document.querySelectorAll(".sheet.open").forEach(p => { p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); });
+  syncEdge();
   setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
 }
+
+/* Gesto "indietro" come nelle app iPhone: dal bordo sinistro trascina verso destra.
+   La pagina segue il dito; se la lasci oltre un terzo dello schermo (o con un colpo veloce) si chiude e torni dove eri. */
+(() => {
+  const edge = $("#edge");
+  let sh = null, x0 = 0, y0 = 0, t0 = 0, dx = 0, mode = "";
+  const topSheet = () => [...document.querySelectorAll(".sheet.open")].sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0];
+  edge.addEventListener("touchstart", e => {
+    sh = topSheet(); if (!sh || e.touches.length > 1) { sh = null; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); dx = 0; mode = "";
+  }, { passive: true });
+  edge.addEventListener("touchmove", e => {
+    if (!sh) return;
+    e.preventDefault();
+    const x = e.touches[0].clientX, y = e.touches[0].clientY;
+    if (!mode) {
+      if (Math.abs(y - y0) > 10 && Math.abs(y - y0) > Math.abs(x - x0)) mode = "v";
+      else if (x - x0 > 8) { mode = "h"; sh.classList.add("dragging"); sh.style.transition = "none"; }
+    }
+    if (mode === "h") { dx = Math.max(0, x - x0); sh.style.transform = `translateX(${dx}px)`; }
+    else if (mode === "v") { sh.scrollTop -= y - y0; y0 = y; }                  // dal bordo si può anche scorrere
+  }, { passive: false });
+  const end = e => {
+    if (!sh) return;
+    const s = sh; sh = null;
+    if (mode !== "h") {
+      if (!mode && e.changedTouches?.[0]) {                                     // semplice tocco sul bordo: lo passo a ciò che c'è sotto
+        const t = e.changedTouches[0];
+        document.elementsFromPoint(t.clientX, t.clientY).find(el => el !== edge && el.tagName !== "IFRAME")?.click();
+      }
+      return;
+    }
+    const w = innerWidth, fast = dx / Math.max(1, Date.now() - t0) > .5;
+    const close = dx > w / 3 || (fast && dx > 40);
+    s.style.transition = "transform .22s ease";
+    s.style.transform = close ? "translateX(100%)" : "translateX(0)";
+    setTimeout(() => {
+      s.classList.remove("dragging");
+      if (close) { s.style.transition = "none"; closeSheet("#" + s.id); s.style.transform = ""; void s.offsetWidth; }
+      else s.style.transform = "";
+      s.style.transition = "";
+    }, 230);
+  };
+  edge.addEventListener("touchend", end);
+  edge.addEventListener("touchcancel", end);
+})();
 
 const ICON = {
   like: '<svg viewBox="0 0 24 24"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg>',
@@ -2281,7 +2333,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011100654";
+const BUILD = "20261011101453";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
