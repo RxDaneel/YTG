@@ -588,8 +588,27 @@ async function resolveChannel(input){
 }
 /* Foto dei canali: quella delle iscrizioni o dei canali già aperti; per gli altri l'iniziale, senza spendere unità */
 const letterAvatar = name => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="20" fill="#3a3a37"/><text x="20" y="26" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#d9d7d1" text-anchor="middle">${esc((name || "?").trim().charAt(0).toUpperCase() || "?")}</text></svg>`);
-const avatarOf = (id, name) => S.channels.find(c => c.id === id)?.thumb || S.avatars[id] || letterAvatar(name);
-function ensureAvatars(){ /* volutamente vuota: le foto dei canali non iscritti non vengono più scaricate */ }
+const avatarOf = (id, name) => S.channels.find(c => c.id === id)?.thumb || S.avatars?.[id] || letterAvatar(name);
+/* Le foto si scaricano una sola volta per canale, a gruppi di 50 (1 unità per gruppo), e restano salvate.
+   Nel frattempo si vede l'iniziale del canale. */
+const avQueue = new Set(); let avTimer = 0, avBusy = false;
+function ensureAvatars(list){
+  for (const v of list || []) if (v?.ch && !S.channels.some(c => c.id === v.ch) && !(v.ch in S.avatars)) avQueue.add(v.ch);
+  if (avQueue.size && !avTimer) avTimer = setTimeout(flushAvatars, 300);
+}
+async function flushAvatars(){
+  avTimer = 0;
+  if (avBusy || !avQueue.size || !S.key || quotaOut()) return;
+  avBusy = true;
+  const ids = [...avQueue].slice(0, 150); ids.forEach(id => avQueue.delete(id));
+  try {
+    const got = await channelInfo(ids);
+    got.forEach(c => S.avatars[c.id] = c.thumb);
+    ids.forEach(id => { if (!(id in S.avatars)) S.avatars[id] = ""; });     // canale senza foto: non riprovare
+    const keys = Object.keys(S.avatars); if (keys.length > 3000) keys.slice(0, keys.length - 3000).forEach(k => delete S.avatars[k]);
+    save(); rerender(); if ($("#player").classList.contains("open")) renderRelated();
+  } catch {} finally { avBusy = false; if (avQueue.size) avTimer = setTimeout(flushAvatars, 300); }
+}
 
 /* ---------- video ---------- */
 function secs(iso){
@@ -832,11 +851,23 @@ function fromPlaylistItem(it){
     at: it.contentDetails.videoPublishedAt || s.publishedAt, dur: 0, live: false, views: 0, likes: 0, comments: 0,
     thumb: (t.maxres || t.standard || t.high || t.medium || t.default || {}).url || "", desc: (s.description || "").slice(0, 200), cat: "", tags: [] };
 }
+async function withDetails(items, dropShorts){
+  const need = items.filter(v => !(CACHE.get(v.id)?.dur > 0)).map(v => v.id);
+  const det = new Map();
+  if (need.length) {
+    for (const v of await videoDetails(need)) {
+      if (v.snippet.liveBroadcastContent === "upcoming") { det.set(v.id, null); continue; }
+      if (dropShorts && looksShort(v, secs(v.contentDetails.duration))) { det.set(v.id, null); continue; }
+      det.set(v.id, toVideo(v));
+    }
+  }
+  return remember(items.map(v => det.has(v.id) ? det.get(v.id) : (CACHE.get(v.id)?.dur > 0 ? CACHE.get(v.id) : v)).filter(Boolean));
+}
 async function channelLatest(id){
   const key = "ch:" + id, rc = S.relCache;
   if (rc[key] && Date.now() - rc[key].at < 24 * 3600000) return remember(rc[key].list);
   const j = await api("playlistItems", { part: "snippet,contentDetails", playlistId: "UULF" + id.slice(2), maxResults: 10 });
-  const list = remember((j.items || []).map(fromPlaylistItem).filter(Boolean));
+  const list = await withDetails((j.items || []).map(fromPlaylistItem).filter(Boolean), false);
   rc[key] = { at: Date.now(), list }; save(); return list;
 }
 async function loadHome(manual){
@@ -917,14 +948,14 @@ function doSearch(q){
   searchQ = q.trim(); if (!searchQ) return;
   searchErr = ""; searchYT = false;
   const key = S.opt.region + ":" + searchQ.toLowerCase(), hit = S.sCache[key];
-  if (hit && Date.now() - hit.at < 24 * 3600000) { searchRes = remember(hit.list); searchYT = true; searchLocal = null; return renderSearch(); }
-  searchLocal = localSearch(searchQ); searchRes = null; renderSearch();
+  if (hit && Date.now() - hit.at < 24 * 3600000) { searchRes = remember(hit.list); searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
+  searchLocal = localSearch(searchQ); searchRes = null; renderSearch(); ensureAvatars(searchLocal);
 }
 /* Ricerca su tutto YouTube: 100 unità (costo fisso di Google), solo quando la chiedi */
 async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
   searchBusy = true; searchErr = ""; renderSearch();
-  try { const r = await searchVideos(searchQ, 30); searchRes = r.list; searchYT = true; searchLocal = null; }
+  try { const r = await searchVideos(searchQ, 30); searchRes = r.list; searchYT = true; searchLocal = null; ensureAvatars(searchRes); }
   catch (e) { searchErr = errMsg(e); }
   finally { searchBusy = false; renderSearch(); }
 }
@@ -1084,7 +1115,7 @@ function renderSettings(){
       <div style="height:8px;border-radius:4px;background:var(--raised);margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100, (S.qDay === qDay() ? S.qUsed || 0 : 0) / 100)}%;background:${quotaOut() ? "var(--danger)" : "var(--accent)"}"></div></div>
       <div class="help" style="padding:0">${quotaOut() ? "Unità finite per oggi. " : ""}Si azzerano ogni giorno alle 9:00. Conteggio stimato da questo telefono.<br>
         ${S.lastCost != null ? `Ultimo aggiornamento delle iscrizioni: <b>${S.lastCost} unità</b>${S.lastInfo ? `, ${S.lastInfo.checked} canali scaricati, ${S.lastInfo.fresh} video nuovi` : ""}.<br>` : ""}
-        Costi indicativi: aggiornare le Iscrizioni 3–15 (in automatico al massimo ogni 2 ore, solo se sei in quella scheda) · Home 0–5 · aprire un video 0 · leggere i commenti 1 · descrizione completa 1 · pagina di un canale 2 · ricerca: gratis tra i video già noti, 100 su tutto YouTube · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
+        Costi indicativi: aggiornare le Iscrizioni 3–15 (in automatico al massimo ogni 2 ore, solo se sei in quella scheda) · Home 0–5 · aprire un video 0 · leggere i commenti 1 · descrizione completa 1 · pagina di un canale 2–3 · foto dei canali nuovi 1 ogni 50 · ricerca: gratis tra i video già noti, 100 su tutto YouTube · commento, Mi piace o iscrizione 50 (costi fissi di Google).</div>
     </div>
 
     <h2 style="margin-top:22px">Chiave API YouTube</h2>
@@ -1688,9 +1719,7 @@ async function loadChanVideos(first){
     if (!CH.strict) j = await fetchPage("UU");
     if (CH?.id !== id) return;
     // con la playlist senza Shorts bastano i dati della playlist (1 unità); altrimenti servono le durate per togliere gli Shorts
-    const vids = (CH.strict ? remember((j.items || []).map(fromPlaylistItem).filter(Boolean))
-      : remember((await videoDetails((j.items || []).map(i => i.contentDetails.videoId)))
-          .filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration))).map(toVideo)))
+    const vids = (await withDetails((j.items || []).map(fromPlaylistItem).filter(Boolean), !CH.strict))
       .sort((a, b) => b.at.localeCompare(a.at));
     CH.vids = first ? vids : CH.vids.concat(vids); CH.page = j.nextPageToken || "";
     if (CH.tab !== "videos") return;
@@ -1727,7 +1756,7 @@ async function openPlaylist(plId, title){
     <div style="font:700 15px var(--serif);margin-top:4px">${esc(title)}</div></div><div id="plItems" class="status" style="padding:8px 16px">Carico…</div>`;
   try {
     const j = await api("playlistItems", { part: "snippet,contentDetails", playlistId: plId, maxResults: 50 });
-    const vids = remember((j.items || []).map(fromPlaylistItem).filter(Boolean));
+    const vids = await withDetails((j.items || []).map(fromPlaylistItem).filter(Boolean), false);
     const box = $("#plItems"); if (!box) return;
     box.className = ""; box.style.padding = "0";
     box.innerHTML = vids.map(rowHTML).join("") || `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`;
@@ -2122,7 +2151,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011093633";
+const BUILD = "20261011094010";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
