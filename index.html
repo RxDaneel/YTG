@@ -425,7 +425,7 @@ async function loadBig(){
   if (!Array.isArray(S.mutedTopics)) S.mutedTopics = [];
   bigReady = true;
 }
-function save(){ clearTimeout(saveT); saveT = setTimeout(saveNow, 400); }
+function save(){ clearTimeout(saveT); saveT = setTimeout(() => (window.requestIdleCallback ? requestIdleCallback(saveNow, { timeout: 3000 }) : saveNow()), 1500); }
 function saveNow(){
   clearTimeout(saveT);
   if (resetting) return;
@@ -605,7 +605,9 @@ async function resolveChannel(input){
 }
 /* Foto dei canali: quella delle iscrizioni o dei canali già aperti; per gli altri l'iniziale, senza spendere unità */
 const letterAvatar = name => "data:image/svg+xml," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="20" fill="#3a3a37"/><text x="20" y="26" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#d9d7d1" text-anchor="middle">${esc((name || "?").trim().charAt(0).toUpperCase() || "?")}</text></svg>`);
-const avatarOf = (id, name) => S.channels.find(c => c.id === id)?.thumb || S.avatars?.[id] || letterAvatar(name);
+let chMapRef = null, chMapLen = -1, chMap = new Map();
+const subMap = () => { if (chMapRef !== S.channels || chMapLen !== S.channels.length) { chMap = new Map(S.channels.map(c => [c.id, c])); chMapRef = S.channels; chMapLen = S.channels.length; } return chMap; };
+const avatarOf = (id, name) => subMap().get(id)?.thumb || S.avatars?.[id] || letterAvatar(name);
 /* Le foto si scaricano una sola volta per canale, a gruppi di 50 (1 unità per gruppo), e restano salvate.
    Nel frattempo si vede l'iniziale del canale. */
 const avQueue = new Set(); let avTimer = 0, avBusy = false;
@@ -1107,11 +1109,12 @@ function bucket(iso){
   return "Più vecchi";
 }
 
+const thumbOf = x => x.id ? `https://i.ytimg.com/vi/${x.id}/hqdefault.jpg` : x.thumb;
 function card(x, menu){
   const bits = [esc(x.chTitle), x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ");
   if (menu === true) return `<div class="cwrap">${card(x)}<button class="cdots" data-cm="${x.id}" aria-label="Altre azioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button></div>`;
   return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
-    <div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+    <div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
       ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
     <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="${esc(x.chTitle)}" data-ch="${x.ch}">
       <div><div class="title">${esc(x.title)}</div><div class="sub">${bits}</div></div></div>
@@ -1144,9 +1147,12 @@ function renderHome(){
 /* arrivando in fondo alla Home se ne caricano altri da soli */
 document.getElementById("main").addEventListener("scroll", e => {
   const m = e.currentTarget;
-  if (tab === "vHome" && m.scrollTop + m.clientHeight > m.scrollHeight - 900) moreHome();
+  const near = m.scrollTop + m.clientHeight > m.scrollHeight - 900;
+  if (tab === "vHome" && near) moreHome();
+  if (tab === "vSubs" && near && subsShow < S.videos.length) { subsShow += 40; renderSubs(); }
 }, { passive: true });
 
+let subsShow = 40;
 function renderSubs(){
   const v = $("#vSubs"); const s = setupNeeded(); if (s) { v.innerHTML = s; return; }
   if (!S.channels.length) {
@@ -1162,13 +1168,15 @@ function renderSubs(){
       ${busy || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica i video</button></div>`}</div>`;
     return;
   }
+  const shownList = list.slice(0, subsShow);
   let html = S.lastFail ? `<button class="more" data-act="refresh" style="display:block;padding:10px 16px 0;color:var(--muted);font-weight:500;font-size:12px;text-align:left">
       ${S.lastFail.n} ${S.lastFail.n === 1 ? "canale non aggiornato" : "canali non aggiornati"} · tocca per riprovare</button>` : "", last = "";
-  for (const x of list) {
+  for (const x of shownList) {
     const b = bucket(x.at);
     if (b !== last) { html += `<div class="group">${b}</div>`; last = b; }
     html += card(x);
   }
+  if (shownList.length < list.length) html += `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="subsMore" style="font-size:13px;padding:8px 14px">Altri video</button></div>`;
   v.innerHTML = html;
 }
 
@@ -1872,7 +1880,7 @@ async function postComment(video, text){
 
 /* ---------- pagina del canale ---------- */
 let CH = null;   // { id, info, tab, vids, page, strict, subId, playlists }
-const isSub = id => S.channels.some(c => c.id === id);
+const isSub = id => subMap().has(id);
 const subs = n => !n ? "" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln di iscritti" : n >= 1e3 ? Math.round(n/1e3) + "K iscritti" : n + " iscritti";
 
 async function openChannel(id){
@@ -1906,7 +1914,7 @@ function renderChannelHead(){
 }
 
 function rowHTML(x){
-  return `<button class="row" data-v="${x.id}"><div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+  return `<button class="row" data-v="${x.id}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
     ${x.live ? `<span class="dur live">LIVE</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
     <div style="min-width:0"><div class="title">${esc(x.title)}</div><div class="sub">${[x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ")}</div></div></button>`;
 }
@@ -2058,7 +2066,7 @@ async function loadMe(manual){
 }
 
 function hcard(x){
-  return `<button class="hcard" data-v="${x.id}"><div class="thumb"><img loading="lazy" src="${esc(x.thumb)}" alt="">
+  return `<button class="hcard" data-v="${x.id}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
     ${x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}</div>
     <div class="title">${esc(x.title)}</div><div class="sub">${esc(x.chTitle)}</div></button>`;
 }
@@ -2158,7 +2166,7 @@ function go(t){
   $("#btnRefresh").hidden = !(t === "vHome" || t === "vSubs" || t === "vMe");
   $("#btnGear").classList.toggle("on", t === "vSettings");
   if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 15 * 60000) loadHome(false, false, true); }
-  if (t === "vSubs") { renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 2 * 3600000) refresh(); }
+  if (t === "vSubs") { subsShow = 40; renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 2 * 3600000) refresh(); }
   if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
   if (t === "vChannels") renderChannels();
   if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 24 * 3600000) loadMe(); }
@@ -2208,6 +2216,7 @@ document.addEventListener("click", e => {
   if (a === "fullRefresh") { go("vSubs"); refresh(true, true); }
   if (a === "home") loadHome(true);
   if (a === "homeMore") moreHome();
+  if (a === "subsMore") { subsShow += 40; renderSubs(); }
   if (a === "login") reauth({ do: "sync" });
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
@@ -2360,7 +2369,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011112156";
+const BUILD = "20261011173833";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
