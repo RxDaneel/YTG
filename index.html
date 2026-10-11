@@ -2296,6 +2296,9 @@ $("#csvFile").addEventListener("change", async e => {
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : tab === "vMe" ? loadMe(true) : refresh(true);
 $("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
+document.querySelectorAll("nav button[data-tab]").forEach(b => b.addEventListener("touchend", e => {
+  e.preventDefault(); e.stopPropagation(); fixViewport(); closeSheets(); go(b.dataset.tab);
+}, { passive: false }));
 $("#btnGear").onclick = () => { closeSheets(); go("vSettings"); };
 $("#logo").onclick = () => { closeSheets(); go("vHome"); };
 $("#pClose").onclick = () => closeSheet("#player");
@@ -2333,15 +2336,16 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261011101453";
+const BUILD = "20261011101740";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
     const { v } = await r.json();
-    if (v && v !== BUILD && !sessionStorage.getItem("ytg.upd." + v)) {
-      sessionStorage.setItem("ytg.upd." + v, "1");
-      await fetch(location.pathname, { cache: "reload" });
-      location.reload();
+    if (v && v !== BUILD && sessionStorage.getItem("ytg.upd") !== v + ":" + Math.floor(Date.now() / 300000)) {
+      sessionStorage.setItem("ytg.upd", v + ":" + Math.floor(Date.now() / 300000));   // al massimo un tentativo ogni 5 minuti
+      saveNow();
+      await fetch(location.pathname, { cache: "reload" }).catch(() => {});
+      location.replace(location.pathname + "?v=" + v);
     }
   } catch {}
 }
@@ -2362,6 +2366,9 @@ function resetZoom(){
 }
 window.visualViewport?.addEventListener("resize", () => setTimeout(resetZoom, 250));
 document.addEventListener("focusout", () => setTimeout(() => { resetZoom(); window.scrollTo(0, 0); }, 150));
+const fixViewport = () => { if (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop) { window.scrollTo(0, 0); document.body.scrollTop = 0; } };
+addEventListener("scroll", fixViewport, { passive: true });
+window.visualViewport?.addEventListener("scroll", () => { if (!document.activeElement?.matches?.("input,textarea")) fixViewport(); });
 addEventListener("pageshow", () => setTimeout(resetZoom, 300));
 setTimeout(resetZoom, 500);
 
@@ -2369,6 +2376,7 @@ setTimeout(resetZoom, 500);
 (async () => {
 await loadBig();
 remember(S.videos); remember(S.home);
+if (location.search.includes("v=")) history.replaceState(null, "", location.pathname + location.hash);
 const after = readLoginReturn();
 if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
