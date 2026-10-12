@@ -117,8 +117,10 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .cdots svg{width:20px;height:20px;fill:currentColor}
 .thumb{position:relative;aspect-ratio:16/9;background:var(--surface);overflow:hidden;max-width:100%}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.vprog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.35);z-index:1}
-.vprog i{display:block;height:100%;background:var(--accent)}
+.vprog{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(0,0,0,.55);z-index:1}
+.vprog i{display:block;height:100%;background:#f2f2f2;box-shadow:0 0 4px rgba(0,0,0,.6)}
+:root[data-theme="neon"] .vprog i{background:#ff2bd6}
+:root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .grow{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--line)}
 .grow img{width:36px;height:36px;border-radius:50%;flex:none;background:var(--raised)}
@@ -2936,7 +2938,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012221913";
+const BUILD = "20261012222227";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
