@@ -1935,7 +1935,7 @@ function toggleLater(v, on){
   if (!v) return;
   if (on ?? !inLater(v.id)) { if (!inLater(v.id)) S.later.unshift({ ...v, desc: "", savedAt: Date.now() }); toast("Salvato in Guarda più tardi"); }
   else { S.later = S.later.filter(x => x.id !== v.id); toast("Rimosso da Guarda più tardi"); }
-  S.later = S.later.slice(0, 300); save();
+  S.later = S.later.slice(0, 5000); save();
   if (tab === "vMe") renderMe();
 }
 
@@ -2167,6 +2167,20 @@ async function authVideos(ids){
   }
   return out;
 }
+/* Tutti i video a cui hai messo Mi piace: 50 per pagina, 1 unità a pagina.
+   Una volta al giorno (o quando aggiorni a mano) li rilegge tutti; le altre volte solo i nuovi in cima. */
+async function fetchLiked(prev, full){
+  const known = new Set(prev.map(v => v.id)), out = []; let tok = "", pages = 0, hitKnown = false;
+  do {
+    const j = await apiAuth("videos", { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50, ...(tok ? { pageToken: tok } : {}) });
+    const items = j.items || []; out.push(...items); tok = j.nextPageToken || ""; pages++;
+    if (!full && items.some(v => known.has(v.id))) { hitKnown = true; break; }
+  } while (tok && pages < 100);
+  const fresh = out.filter(notShort).map(v => ({ ...toVideo(v), desc: "" }));
+  if (full || !hitKnown) return { list: fresh };
+  const ids = new Set(fresh.map(v => v.id));
+  return { list: fresh.concat(prev.filter(v => !ids.has(v.id))) };
+}
 const notShort = v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails?.duration));
 async function loadMe(manual){
   if (ME.busy) return;
@@ -2178,10 +2192,11 @@ async function loadMe(manual){
   ME.busy = true; ME.err = ""; spin(true); renderMe();
   try {
     const settle = p => p.then(v => v, e => { if (e.relogin) throw e; return { items: [], err: e }; });
+    const prev = S.meData, fullLikes = manual || !prev?.likedFull || Date.now() - prev.likedFull > 24 * 3600000;
     const [ch, pls, liked] = await Promise.all([
       settle(apiAuth("channels", { part: "snippet,contentDetails,statistics", mine: "true" })),
       settle(apiAuth("playlists", { part: "snippet,contentDetails,status", mine: "true", maxResults: 50 })),
-      settle(apiAuth("videos", { part: "snippet,contentDetails,statistics", myRating: "like", maxResults: 50 }))
+      settle(fetchLiked(prev?.liked || [], fullLikes))
     ]);
     if (!ch.items?.length) ME.err = "L'account con cui hai fatto l'accesso non ha un canale YouTube. In Impostazioni tocca “Cambia account” e scegli quello con le tue iscrizioni.";
     const c = ch.items?.[0];
@@ -2199,11 +2214,12 @@ async function loadMe(manual){
         subs: c.statistics?.hiddenSubscriberCount ? 0 : +c.statistics?.subscriberCount || 0, n: +c.statistics?.videoCount || 0 } : null,
       playlists: (pls.items || []).map(p => ({ id: p.id, title: p.snippet.title, n: p.contentDetails.itemCount,
         thumb: (p.snippet.thumbnails?.medium || p.snippet.thumbnails?.default || {}).url || "", priv: p.status?.privacyStatus || "" })),
-      liked: (liked.items || []).filter(notShort).map(toVideo),
+      liked: liked.err ? prev?.liked || [] : liked.list,
+      likedFull: liked.err ? prev?.likedFull || 0 : fullLikes ? Date.now() : prev?.likedFull || 0,
       uploads
     };
     remember(S.meData.liked); remember(S.meData.uploads);
-    S.likedIds = [...new Set(S.meData.liked.map(v => v.id).concat(S.likedIds || []))].slice(0, 300); save();
+    S.likedIds = [...new Set(S.meData.liked.map(v => v.id).concat(S.likedIds || []))].slice(0, 5000); save();
     if (manual) toast("Profilo aggiornato");
   } catch (e) {
     ME.err = e.relogin ? "Accedi di nuovo per vedere il tuo profilo." : errMsg(e);
@@ -2259,19 +2275,65 @@ function renderMe(){
 }
 
 async function openMyPlaylist(id){
-  const d = S.meData;
+  const d = S.meData; ME.plShow = 60; ME.laterShow = 60;
   if (id === "later") { ME.pl = { id, title: "Guarda più tardi", items: null }; renderMe(); return toTop(); }
   if (id === "liked") { ME.pl = { id, title: "Video piaciuti", items: d.liked }; return renderMe(); }
   const p = d.playlists.find(x => x.id === id);
   ME.pl = { id, title: p?.title || "Playlist", items: null }; renderMe(); toTop();
   try {
     if (!tokenOk()) throw Object.assign(new Error("Accedi di nuovo per aprire la playlist."), { relogin: true });
-    const j = await apiAuth("playlistItems", { part: "contentDetails", playlistId: id, maxResults: 50 });
-    const ids = (j.items || []).map(i => i.contentDetails.videoId);
+    const ids = []; let tok = "", pages = 0;
+    do {
+      const j = await apiAuth("playlistItems", { part: "contentDetails", playlistId: id, maxResults: 50, ...(tok ? { pageToken: tok } : {}) });
+      ids.push(...(j.items || []).map(i => i.contentDetails.videoId)); tok = j.nextPageToken || ""; pages++;
+    } while (tok && pages < 20);
     const det = ids.length ? await authVideos(ids) : [], order = new Map(ids.map((x, i) => [x, i]));
     if (ME.pl?.id !== id) return;
     ME.pl.items = remember(det.map(toVideo).sort((a, b) => order.get(a.id) - order.get(b.id)));
   } catch (e) { if (ME.pl?.id === id) ME.pl.err = e.relogin ? e.message : errMsg(e); }
+  renderMe();
+}
+/* Importa "Guarda più tardi": YouTube non la dà alle app (dal 2016), ma si può scaricare con Google Takeout
+   (file CSV) oppure incollare dei link. Costo: 1 unità ogni 50 video. */
+function laterImportPanel(){
+  return `<div class="panel" style="margin:6px 16px 10px;padding:14px">
+    <div class="help" style="padding:0">YouTube non permette alle app di leggere la tua playlist Guarda più tardi. Puoi però scaricarla e caricarla qui:</div>
+    <ol class="help" style="padding:0 0 0 18px;margin:8px 0">
+      <li>Apri <b>takeout.google.com</b> e tocca “Deseleziona tutto”.</li>
+      <li>Seleziona solo <b>YouTube e YouTube Music</b>, poi in “Tutti i dati di YouTube inclusi” lascia solo <b>playlist</b>.</li>
+      <li>Crea l'esportazione e scarica lo zip: in File di iPhone toccalo per aprirlo.</li>
+      <li>Qui sotto scegli il file <b>Guarda più tardi-video.csv</b> (nella cartella playlist).</li>
+    </ol>
+    <label class="btn" style="display:inline-block;font-size:13px;padding:8px 14px">Scegli file<input type="file" id="laterFile" accept=".csv,.txt,.json,text/csv,text/plain" style="display:none"></label>
+    <div class="help" style="padding:12px 0 6px">Oppure incolla dei link di video (uno o più):</div>
+    <textarea id="laterText" rows="3" style="width:100%;box-sizing:border-box;font:16px var(--font);background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+    <button class="btn ghost" data-act="laterPaste" style="margin-top:8px;font-size:13px;padding:8px 14px">Importa link</button>
+    ${ME.laterMsg ? `<div class="status" style="padding:10px 0 0">${esc(ME.laterMsg)}</div>` : ""}</div>`;
+}
+function idsFromText(t){
+  const out = [], seen = new Set(), add = (id, at) => { if (!seen.has(id)) { seen.add(id); out.push({ id, at }); } };
+  for (const line of String(t).split(/\r?\n/)) {
+    const m = line.match(/^\s*"?([A-Za-z0-9_-]{11})"?\s*,\s*"?([^,"]*)/);
+    if (m && /\d{4}-\d\d-\d\d/.test(m[2])) { add(m[1], Date.parse(m[2]) || 0); continue; }
+    for (const u of line.matchAll(/(?:youtube\.com\/(?:watch\?(?:[^\s]*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/g)) add(u[1], 0);
+  }
+  return out;
+}
+async function importLater(text){
+  const found = idsFromText(text).filter(x => !inLater(x.id));
+  if (!found.length) { ME.laterMsg = idsFromText(text).length ? "Questi video sono già in Guarda più tardi." : "Non ho trovato video nel file o nel testo."; return renderMe(); }
+  if (!S.key) { ME.laterMsg = "Aggiungi prima la chiave API nelle impostazioni."; return renderMe(); }
+  ME.laterMsg = `Importo ${found.length} video…`; renderMe();
+  try {
+    const det = new Map((await videoDetails(found.map(x => x.id))).filter(v => v.snippet).map(v => [v.id, v]));
+    const now = Date.now();
+    const add = found.filter(x => det.has(x.id)).map((x, i) => ({ ...toVideo(det.get(x.id)), desc: "", savedAt: x.at || now - i }));
+    S.later = S.later.concat(add).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 5000);
+    remember(add); save();
+    const miss = found.length - add.length;
+    ME.laterMsg = `Importati ${add.length} video` + (miss ? ` · ${miss} non più disponibili (privati o eliminati)` : "") + ".";
+    ensureAvatars(add);
+  } catch (e) { ME.laterMsg = "Errore: " + errMsg(e); }
   renderMe();
 }
 function renderMyPlaylist(){
@@ -2280,18 +2342,28 @@ function renderMyPlaylist(){
     remember(S.later);
     v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
         <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Guarda più tardi</h2>
-        <div class="sub">Salvati su questo telefono. Per aggiungere un video: ⋯ sotto il video → Salva in Guarda più tardi.</div></div>
-      ${S.later.length ? S.later.map(x => `<div style="display:flex;align-items:center">${rowHTML(x).replace('class="row"', 'class="row" style="flex:1;min-width:0"')}
+        <div class="sub">Salvati su questo telefono. Per aggiungere un video: ⋯ sotto il video → Salva in Guarda più tardi.</div>
+        <button class="btn ghost" data-act="laterImp" style="margin-top:10px;font-size:13px;padding:8px 14px">Importa da YouTube</button></div>
+      ${ME.laterImp ? laterImportPanel() : ""}
+      ${S.later.length ? S.later.slice(0, ME.laterShow || 60).map(x => `<div style="display:flex;align-items:center">${rowHTML(x).replace('class="row"', 'class="row" style="flex:1;min-width:0"')}
           <button class="rbtn" data-unlater="${x.id}" aria-label="Rimuovi" style="margin-right:8px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("")
+          + (S.later.length > (ME.laterShow || 60) ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="laterMore" style="font-size:13px;padding:8px 14px">Mostra altri (${S.later.length - (ME.laterShow || 60)})</button></div>` : "")
         : `<div class="status" style="padding:12px 16px">Ancora nessun video.</div>`}`;
     return;
   }
   v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
-      <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">${esc(pl.title)}</h2></div>
+      <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">${esc(pl.title)}</h2>${pl.items?.length ? `<div class="sub">${pl.items.length} video</div>` : ""}</div>
     ${pl.err ? `<div class="status err" style="padding:8px 16px">${esc(pl.err)}</div>` : !pl.items ? `<div class="status" style="padding:8px 16px">Carico…</div>`
-      : pl.items.length ? pl.items.map(rowHTML).join("") : `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`}`;
+      : pl.items.length ? pl.items.slice(0, ME.plShow || 60).map(rowHTML).join("")
+          + (pl.items.length > (ME.plShow || 60) ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="plMore" style="font-size:13px;padding:8px 14px">Mostra altri (${pl.items.length - (ME.plShow || 60)})</button></div>` : "")
+        : `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`}`;
 }
 
+document.addEventListener("change", e => {
+  if (e.target.id !== "laterFile" || !e.target.files?.[0]) return;
+  const f = e.target.files[0], r = new FileReader();
+  r.onload = () => importLater(r.result); r.readAsText(f);
+});
 /* ---------- navigazione ---------- */
 const TITLES = { vHome: "Home", vSubs: "Iscrizioni", vSearch: "Cerca", vChannels: "Canali", vSettings: "Impostazioni", vMe: "Tu" };
 const LABEL = t => ["vHome", "vSubs", "vMe"].includes(t) ? "" : TITLES[t];   // le schede della barra in basso non ripetono il nome in alto
@@ -2389,6 +2461,10 @@ document.addEventListener("click", e => {
   if (a === "laterCur") { closeMenu(); return toggleLater(current, true); }
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
+  if (a === "laterImp") { ME.laterImp = !ME.laterImp; ME.laterMsg = ""; return renderMe(); }
+  if (a === "plMore") { ME.plShow = (ME.plShow || 60) + 100; return renderMe(); }
+  if (a === "laterMore") { ME.laterShow = (ME.laterShow || 60) + 100; return renderMe(); }
+  if (a === "laterPaste") return importLater($("#laterText")?.value || "");
   if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
   if (a === "meBack") { ME.pl = null; renderMe(); return toTop(); }
@@ -2527,7 +2603,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012004754";
+const BUILD = "20261012005322";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
