@@ -122,6 +122,14 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 :root[data-theme="neon"] .vprog i{background:#ff2bd6}
 :root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.shist{padding:4px 0 12px}
+.hitem{display:flex;align-items:center}
+.hq{flex:1;min-width:0;display:flex;align-items:center;gap:14px;border:0;background:none;color:var(--fg);font:15px var(--font);padding:11px 4px 11px 16px;text-align:left}
+.hq svg{width:20px;height:20px;flex:none;stroke:var(--muted);fill:none;stroke-width:1.8;stroke-linecap:round}
+.hq span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hq small{color:var(--muted);font-size:11px;flex:none}
+.hx{border:0;background:none;width:44px;height:44px;display:grid;place-items:center;flex:none}
+.hx svg{width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round}
 .lnk{color:#065fd4;text-decoration:none;word-break:break-all}
 @media (prefers-color-scheme:dark){.lnk{color:#3ea6ff}}
 :root[data-theme="carta"] .lnk{color:#065fd4}
@@ -1277,6 +1285,7 @@ function localSearch(q){
    Gratis se la stessa ricerca è stata fatta nelle ultime 24 ore (anche dalla Home). Senza unità: solo tra i video già noti. */
 function doSearch(q){
   searchQ = q.trim(); if (!searchQ) return;
+  addSearchHist(searchQ);
   searchErr = ""; searchYT = false;
   const hit = searchCached(searchQ, "") || searchCached(searchQ, "h:");
   if (hit) { searchRes = hit; searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
@@ -1440,13 +1449,34 @@ function renderSubs(){
   v.innerHTML = html;
 }
 
+/* ---------- cronologia delle ricerche ---------- */
+let sFocus = false;
+function addSearchHist(q){
+  S.sHist = [q].concat((S.sHist || []).filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30); save();
+}
+const ICON_CLOCK = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+function histHTML(filter){
+  const f = (filter || "").trim().toLowerCase();
+  const items = (S.sHist || []).filter(q => !f || q.toLowerCase().includes(f)).slice(0, 15);
+  if (!items.length) return "";
+  return `<div class="shist">${items.map(q => `<div class="hitem"><button class="hq" data-hq="${esc(q)}">${ICON_CLOCK}<span>${esc(q)}</span>${searchCached(q, "") || searchCached(q, "h:") ? `<small>gratis</small>` : ""}</button>
+      <button class="hx" data-hx="${esc(q)}" aria-label="Togli dalla cronologia"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("")}
+    ${f ? "" : `<button class="more" data-act="histClear" style="padding:12px 16px">Cancella cronologia delle ricerche</button>`}</div>`;
+}
 function renderSearch(){
   const v = $("#vSearch");
   if (!v.querySelector("#sForm")) {
     v.innerHTML = `<form class="searchbar" id="sForm"><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca su YouTube" autocomplete="off">
       <button class="btn" type="submit">Cerca</button></form><div id="sRes"></div>`;
+    const inp = $("#sIn");
+    inp.addEventListener("focus", () => { sFocus = true; renderSearch(); });
+    inp.addEventListener("input", () => { if (sFocus) renderSearch(); });
+    inp.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== inp) { sFocus = false; renderSearch(); } }, 250));
   }
   const r = $("#sRes");
+  // mentre scrivi (o se non hai ancora cercato niente) compaiono le ricerche recenti
+  const hist = sFocus || (!searchQ && !searchBusy) ? histHTML(sFocus ? $("#sIn").value : "") : "";
+  if (hist && !searchBusy) { r.innerHTML = hist; return; }
   const ytBtn = `<div style="padding:12px 16px 16px">${quotaOut() ? `<div class="help" style="padding:0">Unità finite per oggi: cerco solo tra i video già noti.</div>` : `<button class="btn" data-act="searchYT">Riprova su YouTube</button>`}</div>`;
   if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}” su YouTube…</p></div>`;
   else if (searchLocal && !searchRes) r.innerHTML = (searchErr ? `<div class="status err" style="padding:12px 16px 0">Errore: ${esc(searchErr)}</div>` : "") + ytBtn + (searchLocal.length
@@ -2796,6 +2826,10 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
+  const hq = e.target.closest("[data-hq]");
+  if (hq) { const q = hq.dataset.hq; $("#sIn").value = q; sFocus = false; $("#sIn").blur(); return doSearch(q); }
+  const hx = e.target.closest("[data-hx]");
+  if (hx) { S.sHist = (S.sHist || []).filter(x => x !== hx.dataset.hx); save(); $("#sIn")?.focus(); return renderSearch(); }
   const yl = e.target.closest("a[data-yt]");
   if (yl) { e.preventDefault(); try { openYtLink(JSON.parse(yl.dataset.yt)); } catch {} return; }
   const sk = e.target.closest("[data-seek]");
@@ -2863,6 +2897,7 @@ document.addEventListener("click", e => {
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
   if (a === "bkExport") return exportBackup();
+  if (a === "histClear") { if (confirm("Cancellare tutta la cronologia delle ricerche?")) { S.sHist = []; save(); renderSearch(); } return; }
   if (a === "grpNew") { GE = { orig: null, name: "", ids: new Set() }; renderSubs(); return toTop(); }
   if (a === "grpEdit") { const g = S.groups.find(x => x.name === S.subsGroup); if (g) { GE = { orig: g.name, name: g.name, ids: new Set(g.ids) }; renderSubs(); toTop(); } return; }
   if (a === "grpCancel") { GE = null; return renderSubs(); }
@@ -2927,7 +2962,7 @@ document.addEventListener("submit", async e => {
     toast("Commento seguito: riceverai qui le risposte"); $("#followIn").value = "";
     return loadNotifs(true);
   }
-  if (id === "sForm") { $("#sIn").blur(); return doSearch($("#sIn").value); }
+  if (id === "sForm") { sFocus = false; $("#sIn").blur(); return doSearch($("#sIn").value); }
   if (id === "cForm") { const txt = $("#cIn").value.trim(); if (txt && current) postComment(current, txt); return; }
   if (id === "keyForm") {
     const k = $("#keyIn").value.replace(/[\s"'`]/g, ""); if (!k) return;
@@ -3013,7 +3048,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012224830";
+const BUILD = "20261012225131";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
