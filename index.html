@@ -354,6 +354,13 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #ptr.back{transition:transform .25s ease,opacity .25s ease}
 /* player di YouTube con i suoi comandi: la barra di YTG e lo strato per mostrarla sono nascosti */
 #pCtl,.reveal{display:none!important}
+/* schermo intero di YTG: resta dentro l'app, così iOS non apre il suo lettore (con la sua seconda barra del volume) */
+.full #player.open .pwrap{position:fixed;left:0;top:0;width:var(--vw,100vw);height:var(--vh,100vh);overflow:hidden;background:#000}
+.full #player.open .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none;transform:none}
+#pFullX{display:none}
+.full #player.open #pFullX{display:grid;place-items:center;position:absolute;z-index:6;left:calc(env(safe-area-inset-left,0px) + 10px);top:calc(env(safe-area-inset-top,0px) + 10px);
+  width:38px;height:38px;border-radius:50%;border:0;background:rgba(0,0,0,.5);opacity:.75}
+#pFullX svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 /* gesto "indietro": trascina dal bordo sinistro verso destra per chiudere la pagina aperta */
 #edge{position:fixed;left:0;top:0;bottom:0;width:16px;z-index:9999;touch-action:none}
 .sheet.dragging{box-shadow:-10px 0 30px rgba(0,0,0,.45)}
@@ -392,10 +399,12 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <div class="pbar">
     <button class="icon-btn" id="pClose" aria-label="Chiudi"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
     <span style="flex:1"></span>
+    <button class="icon-btn" data-act="pFull" aria-label="Schermo intero"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
     <a class="icon-btn" id="pExt" target="_blank" rel="noopener" aria-label="Apri nel browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></a>
   </div>
   <div class="pwrap" id="pWrap">
     <div class="frame" id="pFrame"></div>
+    <button id="pFullX" data-act="pFull" aria-label="Esci dallo schermo intero"><svg viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg></button>
     <div class="reveal" data-act="ctlToggle"></div>
     <div class="ctl" id="pCtl">
       <input type="range" id="cSeek" min="0" max="1000" value="0" step="1" aria-label="Posizione">
@@ -1876,7 +1885,7 @@ async function startPlayer(id, start){
   ypId = id;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3, ...(start > 0 ? { start: Math.floor(start) } : {}),
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 0, iv_load_policy: 3, ...(start > 0 ? { start: Math.floor(start) } : {}),
       ...(S.opt.cc ? { cc_load_policy: 1, cc_lang_pref: S.opt.cc } : {}) },
     events: {
       onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) { ctlShow(true); savePos(); } else if (e.data === 1) ctlShow(); },
@@ -1924,8 +1933,19 @@ document.addEventListener("focusout", () => setTimeout(fitApp, 300));
 addEventListener("pageshow", () => setTimeout(fitApp, 100));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(fitApp, 100); });
 
+/* schermo intero di YTG (pulsante in alto nella pagina del video). Si esce con il pulsante in alto a sinistra
+   o tornando in verticale dopo aver girato il telefono. */
+let wasLandscape = false;
+function setFull(on){
+  const root = document.documentElement;
+  root.classList.toggle("full", on);
+  $("#player").scrollTop = 0; applyLand();
+  wasLandscape = !matchMedia("(orientation: portrait)").matches;
+}
 function applyLand(){
   const land = false, root = document.documentElement;   // schermo intero automatico girando il telefono: disattivato su richiesta
+  const isLand = !matchMedia("(orientation: portrait)").matches;
+  if (root.classList.contains("full")) { if (wasLandscape && !isLand) root.classList.remove("full"); wasLandscape = isLand; }
   const vv = window.visualViewport, W = Math.round(vv ? vv.width * vv.scale : innerWidth), H = Math.round(vv ? vv.height * vv.scale : innerHeight);
   root.style.setProperty("--vh", (H || innerHeight) + "px"); root.style.setProperty("--vw", (W || innerWidth) + "px");
   if (land !== root.classList.contains("land")) {
@@ -3020,6 +3040,7 @@ document.addEventListener("click", e => {
   if (a === "meLater") return openMyPlaylist("later");
   if (a === "bkExport") return exportBackup();
   if (a === "mark") return addMark();
+  if (a === "pFull") return setFull(!document.documentElement.classList.contains("full"));
   if (a === "chSearchAll") return chanSearchAll();
   if (a === "meMarks") return openMyPlaylist("marks");
   if (a === "pasteLink") {
@@ -3182,7 +3203,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012231021";
+const BUILD = "20261012232800";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
