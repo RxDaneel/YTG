@@ -98,7 +98,7 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .prev .pbar{position:absolute;left:0;bottom:0;height:3px;background:#e8e6df;width:0;z-index:3;transition:width .4s linear}
 .prev .pvol{position:absolute;right:8px;top:8px;z-index:3;width:34px;height:34px;border-radius:50%;border:0;background:rgba(20,20,19,.7);display:grid;place-items:center;pointer-events:auto}
 .prev .pvol svg{width:18px;height:18px;stroke:#faf9f5;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.thumb.pressing{transform:scale(.97);transition:transform .35s ease}
+
 .dur{position:absolute;right:8px;bottom:8px;background:rgba(20,20,19,.82);color:#faf9f5;font-size:12px;font-weight:600;padding:2px 5px;border-radius:4px;font-variant-numeric:tabular-nums}
 .live{background:var(--danger)}
 .seen .thumb::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
@@ -380,7 +380,7 @@ const API = "https://www.googleapis.com/youtube/v3/";
 const LS = "ytg.v1";
 
 /* ---------- stato ---------- */
-const DEF_OPT = { hideWatched: false, perChannel: 8, showHome: true, region: "IT", homeSearch: true };
+const DEF_OPT = { inlinePrev: true, hideWatched: false, perChannel: 8, showHome: true, region: "IT", homeSearch: true };
 const S = Object.assign({
   key: "", clientId: "", token: "", tokenExp: 0, tokenScope: "", me: null, lastSync: 0,
   channels: [], videos: [], lastFetch: 0, watched: {}, avatars: {}, noLF: {},
@@ -1397,6 +1397,7 @@ function renderSettings(){
       ${S.mutedTopics.length ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="unmuteAll">Temi tolti dalla Home: ${esc(S.mutedTopics.join(", "))}<small>Tocca per rimetterli tutti</small></button>` : ""}
       <label class="toggle"><div>Paese della Home e della ricerca</div>
         <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${k}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
       <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
         <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -1683,6 +1684,7 @@ function openSheet(sel){ const p = $(sel); p.style.zIndex = ++zTop; p.classList.
 function closeSheet(sel){
   const p = $(sel); p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); syncEdge();
   if (sel === "#player") setTimeout(() => { if (!$("#player").classList.contains("open")) stopPlayer(); }, 300);
+  pvSchedule();
 }
 function closeSheets(){
   document.querySelectorAll(".sheet.open").forEach(p => { p.classList.remove("open"); p.setAttribute("aria-hidden", "true"); });
@@ -1745,22 +1747,24 @@ const ICON = {
 const num = n => !n ? "0" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln" : n >= 1e3 ? (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(".0","").replace(".",",") + "K" : String(n);
 let myRating = "none", cLoadedFor = "", statsFor = "";
 
-/* ---------- anteprima: tieni premuto su un video ----------
-   Dopo mezzo secondo parte muto dentro la miniatura (da circa il 10% del video, per saltare le intro).
-   Continua anche lasciando il dito; si ferma scorrendo via, cambiando scheda o aprendo un altro video.
-   Toccandolo si apre il video dallo stesso punto. Non costa unità. */
-const PV = { id: "", el: null, yp: null, t0: 0, start: 0, timer: 0, fired: false, x: 0, y: 0, obs: null, bar: 0 };
+/* ---------- anteprima automatica, come su YouTube ----------
+   Quando smetti di scorrere, il primo video che resta per intero sullo schermo parte muto nella miniatura
+   (da circa il 10% del video, per saltare le intro). Si ferma quando esce dallo schermo, cambiando scheda
+   o aprendo un video; toccandolo si apre dallo stesso punto. Non costa unità. */
+const PV = { resume: {}, id: "", el: null, yp: null, t0: 0, start: 0, timer: 0, fired: false, x: 0, y: 0, obs: null, bar: 0 };
 const pvTime = () => { try { return PV.yp?.getCurrentTime?.() || PV.start; } catch { return PV.start; } };
 function stopPreview(){
+  if (PV.id && PV.yp) PV.resume[PV.id] = pvTime();                    // tornandoci sopra riprende da lì
   clearInterval(PV.bar); PV.obs?.disconnect();
   try { PV.yp?.destroy(); } catch {}
   PV.el?.querySelector(".prev")?.remove();
   Object.assign(PV, { id: "", el: null, yp: null, obs: null });
 }
+
 async function startPreview(card, id){
   stopPreview();
   const x = CACHE.get(id), th = card.querySelector(".thumb"); if (!x || !th) return;
-  PV.id = id; PV.el = th; PV.start = x.dur > 120 ? Math.round(x.dur * .1) : 0;
+  PV.id = id; PV.el = th; PV.start = Math.floor(PV.resume[id] || (x.dur > 120 ? x.dur * .1 : 0));
   th.insertAdjacentHTML("beforeend", `<div class="prev"><div id="pvp"></div><div class="pbar"></div>
     <span class="pvol" role="button" data-act="pvVol" aria-label="Audio">${CI.mute}</span></div>`);
   PV.obs = new IntersectionObserver(es => { if (es[0] && es[0].intersectionRatio < .5) stopPreview(); }, { threshold: [0, .5] });
@@ -1781,27 +1785,29 @@ function pvVol(){
   if (y.isMuted()) { y.unMute(); y.setVolume(100); } else y.mute();
   const b = PV.el?.querySelector(".pvol"); if (b) b.innerHTML = y.isMuted() ? CI.mute : CI.vol;
 }
-(() => {
-  const main = document.getElementById("main");
-  main.addEventListener("touchstart", e => {
-    const card = e.target.closest("[data-v]"); clearTimeout(PV.timer); PV.fired = false;
-    if (!card || e.touches.length > 1 || e.target.closest(".pvol,.cdots,[data-ch]") || !card.querySelector(".thumb")) return;
-    PV.x = e.touches[0].clientX; PV.y = e.touches[0].clientY;
-    const th = card.querySelector(".thumb");
-    PV.timer = setTimeout(() => {
-      PV.fired = true; th.classList.add("pressing"); setTimeout(() => th.classList.remove("pressing"), 350);
-      if (PV.id !== card.dataset.v) startPreview(card, card.dataset.v);
-    }, 450);
-  }, { passive: true });
-  main.addEventListener("touchmove", e => {
-    if (Math.hypot(e.touches[0].clientX - PV.x, e.touches[0].clientY - PV.y) > 10) clearTimeout(PV.timer);
-  }, { passive: true });
-  main.addEventListener("touchend", () => clearTimeout(PV.timer), { passive: true });
-  main.addEventListener("touchcancel", () => clearTimeout(PV.timer), { passive: true });
-  // il tocco che ha fatto partire l'anteprima non deve anche aprire il video
-  document.addEventListener("click", e => { if (PV.fired) { PV.fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
-  document.addEventListener("contextmenu", e => { if (e.target.closest("[data-v]")) e.preventDefault(); });
-})();
+/* parte da sola quando smetti di scorrere e un video resta per intero sullo schermo per un istante */
+function pvCandidate(){
+  const main = document.getElementById("main"), view = document.getElementById(tab) || main, r = main.getBoundingClientRect();
+  for (const th of view.querySelectorAll(".card .thumb")) {
+    const b = th.getBoundingClientRect();
+    if (b.bottom <= r.top || b.top >= r.bottom) continue;
+    const vis = (Math.min(b.bottom, r.bottom) - Math.max(b.top, r.top)) / b.height;
+    if (vis >= .9) return th.closest("[data-v]");
+  }
+  return null;
+}
+function pvSchedule(){
+  clearTimeout(PV.timer);
+  if (S.opt.inlinePrev === false) return;
+  PV.timer = setTimeout(() => {
+    if (document.hidden || document.querySelector(".sheet.open,.menu") || !S.key) return;
+    if (PV.el && !PV.el.isConnected) stopPreview();             // la lista è stata ridisegnata
+    const c = pvCandidate();
+    if (c && c.dataset.v !== PV.id) startPreview(c, c.dataset.v);
+  }, 1200);
+}
+document.getElementById("main").addEventListener("scroll", pvSchedule, { passive: true });
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopPreview(); else pvSchedule(); });
 function openVideo(id, start){
   const x = CACHE.get(id); if (!x) return;
   if (start == null && PV.id === id) start = pvTime();          // dall'anteprima: riprende dallo stesso punto
@@ -2457,6 +2463,7 @@ function rerender(){
   if (tab === "vHome") renderHome(); else if (tab === "vSubs") renderSubs();
   else if (tab === "vSearch") renderSearch();
   else if (tab === "vMe") renderMe();
+  pvSchedule();
 }
 function go(t){
   stopPreview();
@@ -2474,7 +2481,7 @@ function go(t){
   if (t === "vChannels") renderChannels();
   if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 24 * 3600000) loadMe(); }
   if (t === "vSettings") renderSettings();
-  toTop();
+  toTop(); pvSchedule();
 }
 
 async function addChannels(ids, label){
@@ -2629,6 +2636,7 @@ document.addEventListener("submit", async e => {
 
 document.addEventListener("change", e => {
   const id = e.target.id;
+  if (id === "o_prev") { S.opt.inlinePrev = e.target.checked; save(); if (!e.target.checked) stopPreview(); }
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
   if (id === "o_hsearch") { S.opt.homeSearch = e.target.checked; S.homeFetch = 0; save(); }
   if (id === "o_home") { S.opt.showHome = e.target.checked; save(); $("#navHome").hidden = !S.opt.showHome; }
@@ -2690,7 +2698,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012010519";
+const BUILD = "20261012011002";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
