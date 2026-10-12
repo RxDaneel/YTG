@@ -1352,12 +1352,10 @@ function renderHome(){
     : `<div class="group">Di tendenza · ${esc(regionName(S.opt.region))}</div>
        <div class="help" style="padding:0 16px 12px">Metti like ai video su YouTube o guardane qualcuno qui: la Home imparerà i tuoi gusti.${S.me ? "" : " Accedi con Google per usare anche i tuoi like."}</div>`;
   const shown = list.slice(0, homeShow);
-  const cont = continueList();
-  const contRow = cont.length ? `<div class="shead"><h3>Continua a guardare</h3></div><div class="hrow">${cont.map(hcard).join("")}</div>` : "";
   const tail = moreBusy ? `<div class="status" style="padding:16px;text-align:center">Carico altri video…</div>`
     : shown.length < list.length || !homeMoreEnd ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="homeMore" style="font-size:13px;padding:8px 14px">Altri video</button></div>`
     : `<div class="status" style="padding:16px;text-align:center">Per ora è tutto: trascina in basso per aggiornare.</div>`;
-  v.innerHTML = head + contRow + shown.map(x => card(x, true)).join("") + tail;
+  v.innerHTML = head + shown.map(x => card(x, true)).join("") + tail;
 }
 /* arrivando in fondo alla Home se ne caricano altri da soli */
 document.getElementById("main").addEventListener("scroll", e => {
@@ -2938,7 +2936,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012222227";
+const BUILD = "20261012222413";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
