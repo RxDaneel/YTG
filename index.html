@@ -122,6 +122,17 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 :root[data-theme="neon"] .vprog i{background:#ff2bd6}
 :root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.sbars{display:flex;gap:8px;align-items:flex-end;height:90px;margin-top:14px}
+.sbar{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.sbar i{display:block;width:100%;max-width:28px;background:var(--raised);border-radius:4px 4px 2px 2px}
+.sbar.today i{background:var(--accent)}
+.sbar span{font-size:11px;color:var(--muted)}
+.stch{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;color:var(--fg);padding:5px 0;font:inherit;text-align:left}
+.stch img{width:26px;height:26px;border-radius:50%;flex:none;background:var(--raised)}
+.stch .n{width:34%;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}
+.stch .b{flex:1;height:6px;background:var(--raised);border-radius:3px;overflow:hidden}
+.stch .b i{display:block;height:100%;background:var(--accent)}
+.stch .t{font-size:12px;color:var(--muted);flex:none;min-width:62px;text-align:right}
 .shist{padding:4px 0 12px}
 .hitem{display:flex;align-items:center}
 .hq{flex:1;min-width:0;display:flex;align-items:center;gap:14px;border:0;background:none;color:var(--fg);font:15px var(--font);padding:11px 4px 11px 16px;text-align:left}
@@ -144,6 +155,7 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .tin{width:100%;box-sizing:border-box;font:16px var(--font);background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px}
 .chaps{display:flex;gap:8px;overflow-x:auto;padding:0 16px 14px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .chaps::-webkit-scrollbar{display:none}
+#pInfo .chaps{margin:0 -16px}
 .chap{flex:none;width:150px;text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;padding:8px 10px;font:inherit}
 .chap .ct{display:block;font-size:12px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
 .chap .cn{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.3;margin-top:2px}
@@ -459,7 +471,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catc
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -494,6 +506,8 @@ async function loadBig(){
   if (!Array.isArray(S.mutedTopics)) S.mutedTopics = [];
   if (!Array.isArray(S.myTopics)) S.myTopics = [];
   for (const k of ["pos", "chap"]) if (!S[k] || typeof S[k] !== "object") S[k] = {};
+  if (!Array.isArray(S.marks)) S.marks = [];
+  if (!S.stats || typeof S.stats !== "object" || !S.stats.days) S.stats = { days: {}, names: {} };
   if (!Array.isArray(S.groups)) S.groups = [];
   bigReady = true;
 }
@@ -1284,7 +1298,10 @@ function localSearch(q){
 /* Ricerca come su YouTube: va subito su tutto YouTube (100 unità, costo fisso di Google).
    Gratis se la stessa ricerca è stata fatta nelle ultime 24 ore (anche dalla Home). Senza unità: solo tra i video già noti. */
 function doSearch(q){
-  searchQ = q.trim(); if (!searchQ) return;
+  q = (q || "").trim(); if (!q) return;
+  const y = ytTarget(q.match(URL_RE)?.[0] || "");            // un link di YouTube: apro direttamente il video o il canale
+  if (y) { const i = $("#sIn"); if (i) i.value = ""; return openYtLink(y); }
+  searchQ = q;
   addSearchHist(searchQ);
   searchErr = ""; searchYT = false;
   const hit = searchCached(searchQ, "") || searchCached(searchQ, "h:");
@@ -1476,7 +1493,9 @@ function renderSearch(){
   const r = $("#sRes");
   // mentre scrivi (o se non hai ancora cercato niente) compaiono le ricerche recenti
   const hist = sFocus || (!searchQ && !searchBusy) ? histHTML(sFocus ? $("#sIn").value : "") : "";
-  if (hist && !searchBusy) { r.innerHTML = hist; return; }
+  const paste = `<button class="more" data-act="pasteLink" style="display:flex;align-items:center;gap:10px;padding:12px 16px 4px"><svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Apri un link di YouTube copiato</button>`;
+  if (hist && !searchBusy) { r.innerHTML = paste + hist; return; }
+  if (!searchQ && !searchBusy) { r.innerHTML = paste + `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).<br>Se incolli qui il link di un video, si apre direttamente.</p></div>`; return; }
   const ytBtn = `<div style="padding:12px 16px 16px">${quotaOut() ? `<div class="help" style="padding:0">Unità finite per oggi: cerco solo tra i video già noti.</div>` : `<button class="btn" data-act="searchYT">Riprova su YouTube</button>`}</div>`;
   if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}” su YouTube…</p></div>`;
   else if (searchLocal && !searchRes) r.innerHTML = (searchErr ? `<div class="status err" style="padding:12px 16px 0">Errore: ${esc(searchErr)}</div>` : "") + ytBtn + (searchLocal.length
@@ -1762,7 +1781,34 @@ function savePos(){
     save();
   } catch {}
 }
-setInterval(() => { try { if (yp?.getPlayerState?.() === 1) savePos(); } catch {} }, 5000);
+setInterval(() => { try { if (yp?.getPlayerState?.() === 1) { savePos(); countWatch(5); } } catch {} }, 5000);
+/* ---------- statistiche: secondi guardati per giorno e per canale (ultimi 90 giorni) ---------- */
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function countWatch(sec){
+  if (document.hidden || !ypId) return;
+  const v = CACHE.get(ypId) || current; if (!v) return;
+  const k = dayKey(), D = S.stats.days, d = D[k] || (D[k] = { s: 0, ch: {} });
+  d.s += sec; d.ch[v.ch] = (d.ch[v.ch] || 0) + sec; S.stats.names[v.ch] = v.chTitle;
+  const keys = Object.keys(D).sort(); if (keys.length > 90) keys.slice(0, keys.length - 90).forEach(x => delete D[x]);
+}
+const fmtTime = s => { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+function statsHTML(){
+  const D = S.stats.days, sumDays = (from, n) => { let t = 0; for (let i = 0; i < n; i++) { const d = new Date(from); d.setDate(d.getDate() - i); t += D[dayKey(d)]?.s || 0; } return t; };
+  const now = new Date(), wk = sumDays(now, 7), prev = (() => { const d = new Date(now); d.setDate(d.getDate() - 7); return sumDays(d, 7); })();
+  if (!wk && !prev && !Object.keys(D).length) return "";
+  const opened = Object.values(S.watched).filter(t => t > Date.now() - 7 * 864e5).length;
+  const days = Array.from({ length: 7 }, (_, i) => { const d = new Date(now); d.setDate(d.getDate() - 6 + i); return { l: "DLMMGVS"[d.getDay()], s: D[dayKey(d)]?.s || 0, today: i === 6 }; });
+  const max = Math.max(...days.map(d => d.s), 60);
+  const ch = {}; for (let i = 0; i < 30; i++) { const d = new Date(now); d.setDate(d.getDate() - i); for (const [c, s] of Object.entries(D[dayKey(d)]?.ch || {})) ch[c] = (ch[c] || 0) + s; }
+  const top = Object.entries(ch).sort((a, b) => b[1] - a[1]).slice(0, 5), topMax = top[0]?.[1] || 1;
+  const diff = prev ? Math.round((wk - prev) / prev * 100) : null;
+  return `<div class="shead"><h3>Statistiche</h3><span class="sub">tempo guardato in YTG</span></div>
+    <div class="panel stats" style="margin:0 16px 8px;padding:14px">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:24px">${fmtTime(wk)}</b><span class="sub">ultimi 7 giorni · ${opened} video aperti${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai 7 giorni prima` : ""}</span></div>
+      <div class="sbars">${days.map(d => `<div class="sbar${d.today ? " today" : ""}"><i style="height:${Math.max(2, d.s / max * 100)}%"></i><span>${d.l}</span></div>`).join("")}</div>
+      ${top.length ? `<div class="sub" style="margin:14px 0 6px">Canali più guardati (30 giorni)</div>${top.map(([c, s]) => `<button class="stch" data-ch="${c}"><img src="${esc(avatarOf(c, S.stats.names[c] || ""))}" alt=""><span class="n">${esc(S.stats.names[c] || "")}</span><span class="b"><i style="width:${s / topMax * 100}%"></i></span><span class="t">${fmtTime(s)}</span></button>`).join("")}` : ""}
+    </div>`;
+}
 function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; document.documentElement.classList.remove("full"); }
 
 /* ---------- controlli del player ---------- */
@@ -1958,7 +2004,8 @@ const ICON = {
   like: '<svg viewBox="0 0 24 24"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg>',
   dislike: '<svg viewBox="0 0 24 24"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1zm0 0-4 7a2.5 2.5 0 0 1-2.6-3L11 14H5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.2 3H17"/></svg>',
   share: '<svg viewBox="0 0 24 24"><path d="M14 5l7 7-7 7v-4c-5 0-8.5 1.5-11 5 1-5 4-10 11-11z"/></svg>',
-  dots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>'
+  dots: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>',
+  mark: '<svg viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/><path d="M12 7.5v5M9.5 10h5"/></svg>'
 };
 const num = n => !n ? "0" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln" : n >= 1e3 ? (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(".0","").replace(".",",") + "K" : String(n);
 let myRating = "none", cLoadedFor = "", statsFor = "";
@@ -2067,8 +2114,10 @@ function renderWatch(){
       <button class="rbtn" id="rLike" data-act="like" aria-label="Mi piace">${ICON.like}</button>
       <button class="rbtn" id="rDislike" data-act="dislike" aria-label="Non mi piace">${ICON.dislike}</button>
       <button class="rbtn" data-act="share" aria-label="Condividi">${ICON.share}</button>
+      <button class="rbtn" data-act="mark" aria-label="Salva questo momento">${ICON.mark}</button>
       <button class="rbtn" data-act="vmenu" aria-label="Altro">${ICON.dots}</button>
     </div>
+    <div id="vMarks"></div>
     <div id="vChap"></div>
     <button class="ccard" data-act="openComments">
       <div class="h">Commenti<span id="cCount">${x.comments ? num(x.comments) : ""}</span></div>
@@ -2078,7 +2127,29 @@ function renderWatch(){
     <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili · 100 unità</button></div>`;
   renderRelated(); loadRelated(x);
   paintRating();
-  loadChapters(x.id);
+  loadChapters(x.id); paintMarks();
+}
+/* ---------- segnalibri: momenti salvati dentro i video, con una nota ---------- */
+const markKey = m => m.id + ":" + m.t + ":" + m.at;
+function addMark(){
+  if (!current || !ok()) return toast("Fai partire il video, poi salva il momento");
+  const t = Math.floor(yp.getCurrentTime() || 0), v = current;
+  const note = prompt(`Segnalibro a ${fmtDur(t)}\nAggiungi una nota (facoltativa):`, "");
+  if (note === null) return;
+  S.marks.unshift({ id: v.id, t, note: note.trim().slice(0, 200), at: Date.now(),
+    v: { id: v.id, title: v.title, ch: v.ch, chTitle: v.chTitle, thumb: v.thumb, dur: v.dur, at: v.at, views: v.views || 0 } });
+  S.marks = S.marks.slice(0, 500); save(); paintMarks(); toast("Momento salvato a " + fmtDur(t));
+}
+function paintMarks(){
+  const el = $("#vMarks"); if (!el || !current) return;
+  const ms = S.marks.filter(m => m.id === current.id).sort((a, b) => a.t - b.t);
+  el.innerHTML = ms.length ? `<div class="group" style="padding-top:2px">I tuoi segnalibri</div><div class="chaps">${ms.map(m =>
+    `<button class="chap" data-seek="${m.t}"><span class="ct">${fmtDur(m.t)}</span><span class="cn">${esc(m.note || "Segnalibro")}</span></button>`).join("")}</div>` : "";
+}
+function openMark(key){
+  const m = S.marks.find(x => markKey(x) === key); if (!m) return;
+  if (!CACHE.get(m.id)) remember([m.v]);
+  openVideo(m.id, m.t);
 }
 /* ---------- capitoli ----------
    Dalla descrizione completa (1 unità, una volta sola per video: poi restano salvati).
@@ -2456,6 +2527,7 @@ function renderChannelHead(){
     <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button></div>
     ${s.description ? `<div class="cabout" id="cAbout">${esc(s.description)}</div><div style="padding:0 16px"><button class="more" data-act="chAbout">Altro</button></div>` : ""}
     <div class="ctabs"><button data-ctab="videos" aria-current="${CH.tab === "videos"}">Video</button><button data-ctab="playlists" aria-current="${CH.tab === "playlists"}">Playlist</button></div>
+    <form class="searchbar" id="chSearch" style="padding-top:10px"><input id="chQ" type="search" enterkeyhint="search" placeholder="Cerca nel canale" autocomplete="off"><button class="btn" type="submit">Cerca</button></form>
     <div id="chList"></div><div style="padding:4px 16px"><button class="more" id="chMoreBtn" data-act="chMore" hidden>Carica altri video</button></div>`;
 }
 
@@ -2479,16 +2551,43 @@ async function loadChanVideos(first){
       .sort((a, b) => b.at.localeCompare(a.at));
     CH.vids = first ? vids : CH.vids.concat(vids); CH.page = j.nextPageToken || "";
     if (CH.tab !== "videos") return;
+    if ($("#chQ")?.value) return chanFilter();
     list.innerHTML = CH.vids.length ? CH.vids.map(rowHTML).join("") : `<div class="status" style="padding:12px 16px">Nessun video.</div>`;
     btn.hidden = !CH.page;
   } catch (e) { if (CH?.id === id) list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; }
 }
 
+/* ---------- cerca dentro un canale ----------
+   Scrivendo: filtro tra i video del canale già caricati (gratis). Con "Cerca": tutto il canale (100 unità, gratis se ripetuta entro 24 ore). */
+function chanFilter(){
+  const q = ($("#chQ")?.value || "").trim().toLowerCase(), list = $("#chList"), btn = $("#chMoreBtn");
+  if (!list || CH.tab !== "videos") return;
+  CH.sres = null;
+  if (!q) { list.innerHTML = CH.vids.map(rowHTML).join(""); btn.hidden = !CH.page; return; }
+  const ws = q.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/);
+  const hits = CH.vids.filter(v => { const t = v.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); return ws.every(w => t.includes(w)); });
+  const free = searchCached(q, "c:" + CH.id + ":");
+  btn.hidden = true;
+  list.innerHTML = `<div style="padding:8px 16px 4px"><button class="btn ghost" data-act="chSearchAll" style="font-size:13px;padding:8px 14px">Cerca “${esc(q)}” in tutto il canale · ${free ? "gratis" : "100 unità"}</button></div>
+    ${hits.length ? `<div class="group">Tra i video caricati</div>` + hits.map(rowHTML).join("") : `<div class="status" style="padding:8px 16px">Nessuno dei video caricati contiene “${esc(q)}”.</div>`}`;
+}
+async function chanSearchAll(){
+  const q = ($("#chQ")?.value || "").trim(), id = CH.id, list = $("#chList"); if (!q) return;
+  if (CH.tab !== "videos") chanTab("videos");
+  list.innerHTML = `<div class="status" style="padding:12px 16px">Cerco “${esc(q)}” nel canale…</div>`; $("#chMoreBtn").hidden = true;
+  try {
+    const r = await searchVideos(q, 50, { channelId: id, order: "relevance" }, "c:" + id + ":");
+    if (CH?.id !== id) return;
+    CH.sres = r.list;
+    list.innerHTML = `<div class="group">Risultati in tutto il canale${r.cached ? " · gratis" : ""}</div>` + (r.list.length ? r.list.map(rowHTML).join("") : `<div class="status" style="padding:8px 16px">Nessun video trovato.</div>`);
+  } catch (e) { list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; }
+}
 async function chanTab(tabName){
   CH.tab = tabName;
   document.querySelectorAll(".ctabs button").forEach(b => b.setAttribute("aria-current", b.dataset.ctab === tabName));
   const list = $("#chList"), btn = $("#chMoreBtn");
-  if (tabName === "videos") { list.innerHTML = CH.vids.map(rowHTML).join(""); btn.hidden = !CH.page; return; }
+  if ($("#chSearch")) $("#chSearch").hidden = tabName !== "videos";
+  if (tabName === "videos") { if ($("#chQ")?.value) return chanFilter(); list.innerHTML = CH.vids.map(rowHTML).join(""); btn.hidden = !CH.page; return; }
   btn.hidden = true;
   if (!CH.playlists) {
     list.innerHTML = `<div class="status" style="padding:12px 16px">Carico le playlist…</div>`;
@@ -2671,6 +2770,9 @@ function renderMe(){
   const laterRow = `<button class="row" data-act="meLater"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
       <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></div>
       <div style="min-width:0"><div class="title">Guarda più tardi</div><div class="sub">${S.later.length} video · salvati in YTG</div></div></button>`;
+  const marksRow = `<button class="row" data-act="meMarks"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
+      <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></svg></div>
+      <div style="min-width:0"><div class="title">Segnalibri</div><div class="sub">${S.marks.length} momenti salvati</div></div></button>`;
   v.innerHTML = head + `
     ${ME.err ? `<div class="status err" style="padding:0 16px">${esc(ME.err)}</div>` : ""}
     ${ME.busy && !d ? `<div class="status" style="padding:8px 16px">Carico il tuo profilo…</div>` : ""}
@@ -2679,8 +2781,11 @@ function renderMe(){
     ${hist.length ? `<div class="shead"><h3>Cronologia</h3><span class="sub">video aperti in YTG</span></div>
       <div class="hrow">${hist.map(hcard).join("")}</div>` : ""}
 
-    <div class="shead"><h3>Playlist</h3><span class="sub">${d ? d.playlists.length + 2 : 1}</span></div>
+    ${statsHTML()}
+
+    <div class="shead"><h3>Playlist</h3><span class="sub">${d ? d.playlists.length + 3 : 2}</span></div>
     ${laterRow}
+    ${marksRow}
     ${d ? `<button class="row" data-act="meLiked"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
         <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg></div>
         <div style="min-width:0"><div class="title">Video piaciuti</div><div class="sub">${d.liked.length} video${d.likedShorts ? ` · ${d.likedShorts} Shorts esclusi` : ""}</div></div></button>
@@ -2696,6 +2801,7 @@ function renderMe(){
 async function openMyPlaylist(id){
   const d = S.meData; ME.plShow = 60; ME.laterShow = 60;
   if (id === "later") { ME.pl = { id, title: "Guarda più tardi", items: null }; renderMe(); return toTop(); }
+  if (id === "marks") { ME.pl = { id, title: "Segnalibri", items: null }; renderMe(); return toTop(); }
   if (id === "liked") { ME.pl = { id, title: "Video piaciuti", items: d.liked }; return renderMe(); }
   const p = d.playlists.find(x => x.id === id);
   ME.pl = { id, title: p?.title || "Playlist", items: null }; renderMe(); toTop();
@@ -2757,6 +2863,17 @@ async function importLater(text){
 }
 function renderMyPlaylist(){
   const v = $("#vMe"), pl = ME.pl;
+  if (pl.id === "marks") {
+    v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
+        <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Segnalibri</h2>
+        <div class="sub">Per salvarne uno: nella pagina del video tocca il segnalibro accanto a Condividi.</div></div>
+      ${S.marks.length ? S.marks.map(m => `<div style="display:flex;align-items:center">
+          <button class="row" data-mark="${esc(markKey(m))}" style="flex:1;min-width:0"><div class="thumb"><img loading="lazy" src="${esc(thumbOf(m.v))}" alt=""><span class="dur">${fmtDur(m.t)}</span></div>
+            <div style="min-width:0"><div class="title">${esc(m.note || m.v.title)}</div><div class="sub">${m.note ? esc(m.v.title) + " · " : ""}${esc(m.v.chTitle || "")}</div></div></button>
+          <button class="rbtn" data-unmark="${esc(markKey(m))}" aria-label="Elimina" style="margin-right:8px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("")
+        : `<div class="status" style="padding:12px 16px">Ancora nessun segnalibro.</div>`}`;
+    return;
+  }
   if (pl.id === "later") {
     remember(S.later);
     v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
@@ -2778,6 +2895,7 @@ function renderMyPlaylist(){
         : `<div class="status" style="padding:8px 16px">Playlist vuota.</div>`}`;
 }
 
+document.addEventListener("input", e => { if (e.target.id === "chQ") chanFilter(); });
 document.addEventListener("change", e => {
   if (e.target.dataset?.gch && GE) { e.target.checked ? GE.ids.add(e.target.dataset.gch) : GE.ids.delete(e.target.dataset.gch); const c = $("#grpCount"); if (c) c.textContent = GE.ids.size + " canali scelti"; return; }
   if (e.target.id === "bkFile" && e.target.files?.[0]) { const r = new FileReader(); r.onload = () => importBackup(r.result); r.readAsText(e.target.files[0]); e.target.value = ""; return; }
@@ -2826,6 +2944,10 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
+  const mk = e.target.closest("[data-mark]");
+  if (mk) return openMark(mk.dataset.mark);
+  const um = e.target.closest("[data-unmark]");
+  if (um) { S.marks = S.marks.filter(m => markKey(m) !== um.dataset.unmark); save(); return renderMe(); }
   const hq = e.target.closest("[data-hq]");
   if (hq) { const q = hq.dataset.hq; $("#sIn").value = q; sFocus = false; $("#sIn").blur(); return doSearch(q); }
   const hx = e.target.closest("[data-hx]");
@@ -2897,6 +3019,17 @@ document.addEventListener("click", e => {
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
   if (a === "bkExport") return exportBackup();
+  if (a === "mark") return addMark();
+  if (a === "chSearchAll") return chanSearchAll();
+  if (a === "meMarks") return openMyPlaylist("marks");
+  if (a === "pasteLink") {
+    if (!navigator.clipboard?.readText) return toast("Incolla il link nella barra di ricerca");
+    navigator.clipboard.readText().then(txt => {
+      const y = [...String(txt).matchAll(URL_RE)].map(m => ytTarget(m[1])).find(Boolean);
+      y ? openYtLink(y) : toast("Negli appunti non c'è un link di YouTube");
+    }, () => toast("Incolla il link nella barra di ricerca"));
+    return;
+  }
   if (a === "histClear") { if (confirm("Cancellare tutta la cronologia delle ricerche?")) { S.sHist = []; save(); renderSearch(); } return; }
   if (a === "grpNew") { GE = { orig: null, name: "", ids: new Set() }; renderSubs(); return toTop(); }
   if (a === "grpEdit") { const g = S.groups.find(x => x.name === S.subsGroup); if (g) { GE = { orig: g.name, name: g.name, ids: new Set(g.ids) }; renderSubs(); toTop(); } return; }
@@ -2962,6 +3095,7 @@ document.addEventListener("submit", async e => {
     toast("Commento seguito: riceverai qui le risposte"); $("#followIn").value = "";
     return loadNotifs(true);
   }
+  if (id === "chSearch") { $("#chQ").blur(); return chanSearchAll(); }
   if (id === "sForm") { sFocus = false; $("#sIn").blur(); return doSearch($("#sIn").value); }
   if (id === "cForm") { const txt = $("#cIn").value.trim(); if (txt && current) postComment(current, txt); return; }
   if (id === "keyForm") {
@@ -3048,7 +3182,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012225131";
+const BUILD = "20261012231021";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
