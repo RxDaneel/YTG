@@ -38,11 +38,22 @@
 :root[data-theme="grafite"]{--bg:#1a1a19;--surface:#242422;--raised:#2e2e2b;--line:#353532;--fg:#f5f4ef;--muted:#9c9a92;--accent:#d9d7d1;--on-accent:#1a1a19;--danger:#e06060;--glass:rgba(26,26,25,0.92);color-scheme:dark}
 :root[data-theme="carta"]{--bg:#f3f1ea;--surface:#e9e6dc;--raised:#dfdbcf;--line:#d6d1c4;--fg:#141413;--muted:#65635c;--accent:#3b3b38;--on-accent:#f5f4ef;--danger:#c43c3c;--glass:rgba(243,241,234,0.92);color-scheme:light}
 :root[data-theme="oled"]{--bg:#000000;--surface:#0e0e0e;--raised:#1a1a1a;--line:#232323;--fg:#f2f2f2;--muted:#8c8c8c;--accent:#e6e6e6;--on-accent:#000000;--danger:#e06060;--glass:rgba(0,0,0,0.92);color-scheme:dark}
-:root[data-theme="notte"]{--bg:#0f1420;--surface:#172033;--raised:#1f2a40;--line:#283450;--fg:#e8edf7;--muted:#8d9ab3;--accent:#8fb4ff;--on-accent:#0f1420;--danger:#ff7a7a;--glass:rgba(15,20,32,0.92);color-scheme:dark}
-:root[data-theme="foresta"]{--bg:#121815;--surface:#1a221d;--raised:#232d27;--line:#2c3831;--fg:#eef2ec;--muted:#93a196;--accent:#9fcfa8;--on-accent:#121815;--danger:#e57373;--glass:rgba(18,24,21,0.92);color-scheme:dark}
-:root[data-theme="lavanda"]{--bg:#17141f;--surface:#201c2b;--raised:#2a2538;--line:#342e46;--fg:#f0ecf7;--muted:#9d95ad;--accent:#c4b0f5;--on-accent:#17141f;--danger:#f07a8a;--glass:rgba(23,20,31,0.92);color-scheme:dark}
-:root[data-theme="seppia"]{--bg:#f4ecdf;--surface:#eadfcd;--raised:#dfd1ba;--line:#d3c3a6;--fg:#2b2118;--muted:#7a6a58;--accent:#8a5a2b;--on-accent:#fbf6ee;--danger:#b0412e;--glass:rgba(244,236,223,0.92);color-scheme:light}
-:root[data-theme="oceano"]{--bg:#eef4f6;--surface:#e1ebef;--raised:#d2e0e6;--line:#c4d5dd;--fg:#10242c;--muted:#587079;--accent:#1f6f8b;--on-accent:#f2f8fa;--danger:#c0443c;--glass:rgba(238,244,246,0.92);color-scheme:light}
+/* due temi un po' pazzi */
+:root[data-theme="neon"]{--bg:#12062a;--surface:#1e0c42;--raised:#2b1260;--line:#3e1a85;--fg:#fdf0ff;--muted:#b896e0;--accent:#ff2bd6;--on-accent:#12062a;--danger:#ffcc00;--glass:rgba(18,6,42,.88);color-scheme:dark}
+:root[data-theme="neon"] body{background:radial-gradient(130% 70% at 50% -10%,#4a1490 0%,#12062a 55%) fixed,#12062a}
+:root[data-theme="neon"] #main{background:transparent}
+:root[data-theme="neon"] .title,:root[data-theme="neon"] h2{text-shadow:0 0 10px rgba(255,43,214,.45)}
+:root[data-theme="neon"] .btn:not(.ghost),:root[data-theme="neon"] .pill.on{box-shadow:0 0 14px rgba(255,43,214,.7),0 0 2px #fff inset}
+:root[data-theme="neon"] .thumb{border:1px solid rgba(0,240,255,.35);box-shadow:0 0 18px rgba(0,240,255,.18)}
+:root[data-theme="neon"] nav [aria-current="true"]{color:#00f0ff;filter:drop-shadow(0 0 6px #00f0ff)}
+:root[data-theme="neon"] .dur{background:#ff2bd6;color:#12062a}
+:root[data-theme="term"]{--bg:#020a03;--surface:#061408;--raised:#0b2210;--line:#124a1c;--fg:#41ff74;--muted:#22a845;--accent:#41ff74;--on-accent:#020a03;--danger:#ffb000;--glass:rgba(2,10,3,.92);--font:"SF Mono",ui-monospace,Menlo,"Courier New",monospace;color-scheme:dark}
+:root[data-theme="term"] body{text-shadow:0 0 6px rgba(65,255,116,.45)}
+:root[data-theme="term"] #main::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+:root[data-theme="term"] .thumb img,:root[data-theme="term"] img.avatar{filter:grayscale(1) sepia(1) hue-rotate(70deg) saturate(3) brightness(.85) contrast(1.1)}
+:root[data-theme="term"] .thumb,:root[data-theme="term"] .panel,:root[data-theme="term"] .btn{border-radius:0 !important}
+:root[data-theme="term"] .title::before{content:"> "}
+:root[data-theme="term"] .dur{background:#020a03;color:#41ff74;border:1px solid #41ff74;border-radius:0}
 .themes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px}
 .themes button{border:1.5px solid var(--line);border-radius:12px;padding:10px 6px 8px;background:var(--surface);color:var(--fg);font:500 12.5px var(--font);display:flex;flex-direction:column;align-items:center;gap:7px}
 .themes button[aria-pressed="true"]{border-color:var(--fg)}
@@ -1400,11 +1411,8 @@ const THEMES = {
   grafite: { name: "Grafite", bg: "#1a1a19", su: "#2e2e2b", ac: "#d9d7d1" },
   carta: { name: "Carta", bg: "#f3f1ea", su: "#dfdbcf", ac: "#3b3b38" },
   oled: { name: "Nero OLED", bg: "#000000", su: "#1a1a1a", ac: "#e6e6e6" },
-  notte: { name: "Notte", bg: "#0f1420", su: "#1f2a40", ac: "#8fb4ff" },
-  foresta: { name: "Foresta", bg: "#121815", su: "#232d27", ac: "#9fcfa8" },
-  lavanda: { name: "Lavanda", bg: "#17141f", su: "#2a2538", ac: "#c4b0f5" },
-  seppia: { name: "Seppia", bg: "#f4ecdf", su: "#dfd1ba", ac: "#8a5a2b" },
-  oceano: { name: "Oceano", bg: "#eef4f6", su: "#d2e0e6", ac: "#1f6f8b" }
+  neon: { name: "Neon", bg: "#12062a", su: "#2b1260", ac: "#ff2bd6" },
+  term: { name: "Terminale", bg: "#020a03", su: "#0b2210", ac: "#41ff74" }
 };
 function applyTheme(t){
   t = THEMES[t] ? t : "auto";
@@ -2749,7 +2757,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012011541";
+const BUILD = "20261012012126";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
