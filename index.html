@@ -93,7 +93,10 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 [data-v]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 [data-v] img{-webkit-touch-callout:none;pointer-events:none}
-.prev{position:absolute;inset:0;background:#000;z-index:2}
+.prev{position:absolute;inset:0;z-index:2}
+.prev>:first-child{opacity:0;transition:opacity .5s ease}
+.prev.live>:first-child{opacity:1}
+.prev:not(.live) .pvol,.prev:not(.live) .pbar{opacity:0}
 .prev iframe,.prev>div{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}
 .prev .pbar{position:absolute;left:0;bottom:0;height:3px;background:#e8e6df;width:0;z-index:3;transition:width .4s linear}
 .prev .pvol{position:absolute;right:8px;top:8px;z-index:3;width:34px;height:34px;border-radius:50%;border:0;background:rgba(20,20,19,.7);display:grid;place-items:center;pointer-events:auto}
@@ -1773,7 +1776,12 @@ async function startPreview(card, id){
   PV.yp = new YT.Player("pvp", { width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
     playerVars: { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: 0, disablekb: 1, start: PV.start },
     events: { onReady: e => { if (PV.id !== id) return; e.target.mute(); e.target.playVideo(); },
-      onStateChange: e => { if (e.data === 0 && PV.id === id) stopPreview(); } } });
+      onStateChange: e => {
+        if (PV.id !== id) return;
+        if (e.data === 0) return stopPreview();
+        // la miniatura resta finché il video sta davvero andando: niente schermo nero, rotellina o pulsante play
+        if (e.data === 1) setTimeout(() => { if (PV.id === id) th.querySelector(".prev")?.classList.add("live"); }, 350);
+      } } });
   PV.bar = setInterval(() => {
     if (PV.id !== id || !PV.yp?.getDuration) return;
     const d = PV.yp.getDuration() || x.dur || 0, b = th.querySelector(".pbar");
@@ -2698,7 +2706,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012011002";
+const BUILD = "20261012011254";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
