@@ -1267,18 +1267,21 @@ function localSearch(q){
   }
   return out.sort((a, b) => b[0] - a[0] || b[1].at.localeCompare(a[1].at)).map(x => x[1]).slice(0, 40);
 }
+/* Ricerca come su YouTube: va subito su tutto YouTube (100 unità, costo fisso di Google).
+   Gratis se la stessa ricerca è stata fatta nelle ultime 24 ore (anche dalla Home). Senza unità: solo tra i video già noti. */
 function doSearch(q){
   searchQ = q.trim(); if (!searchQ) return;
   searchErr = ""; searchYT = false;
-  const key = S.opt.region + ":" + searchQ.toLowerCase(), hit = S.sCache[key];
-  if (hit && Date.now() - hit.at < 24 * 3600000) { searchRes = remember(hit.list); searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
-  searchLocal = localSearch(searchQ); searchRes = null; renderSearch(); ensureAvatars(searchLocal);
+  const hit = searchCached(searchQ, "") || searchCached(searchQ, "h:");
+  if (hit) { searchRes = hit; searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
+  searchLocal = localSearch(searchQ); searchRes = null;
+  if (S.key && !quotaOut()) return doSearchYT();
+  renderSearch(); ensureAvatars(searchLocal);
 }
-/* Ricerca su tutto YouTube: 100 unità (costo fisso di Google), solo quando la chiedi */
 async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
   searchBusy = true; searchErr = ""; renderSearch();
-  try { const r = await searchVideos(searchQ, 30); searchRes = r.list; searchYT = true; searchLocal = null; ensureAvatars(searchRes); }
+  try { const r = await searchVideos(searchQ, 50); searchRes = r.list; searchYT = true; searchLocal = null; ensureAvatars(searchRes); }
   catch (e) { searchErr = errMsg(e); }
   finally { searchBusy = false; renderSearch(); }
 }
@@ -1438,15 +1441,15 @@ function renderSearch(){
       <button class="btn" type="submit">Cerca</button></form><div id="sRes"></div>`;
   }
   const r = $("#sRes");
-  const ytBtn = `<div style="padding:12px 16px 16px"><button class="btn" data-act="searchYT">Cerca “${esc(searchQ)}” su tutto YouTube · 100 unità</button></div>`;
+  const ytBtn = `<div style="padding:12px 16px 16px">${quotaOut() ? `<div class="help" style="padding:0">Unità finite per oggi: cerco solo tra i video già noti.</div>` : `<button class="btn" data-act="searchYT">Riprova su YouTube</button>`}</div>`;
   if (searchBusy) r.innerHTML = `<div class="empty"><p>Cerco “${esc(searchQ)}” su YouTube…</p></div>`;
   else if (searchLocal && !searchRes) r.innerHTML = (searchErr ? `<div class="status err" style="padding:12px 16px 0">Errore: ${esc(searchErr)}</div>` : "") + ytBtn + (searchLocal.length
       ? `<div class="group">Tra i video che YTG conosce già · 0 unità</div>` + searchLocal.map(card).join("")
       : `<div class="empty"><p>Nessun video già noto contiene “${esc(searchQ)}”.</p></div>`);
   else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
   else if (searchRes && !searchRes.length) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
-  else if (searchRes) r.innerHTML = `<div class="group">Risultati per “${esc(searchQ)}”</div>` + searchRes.map(card).join("");
-  else r.innerHTML = `<div class="empty"><p>La ricerca guarda prima tra i video che YTG conosce già, senza consumare unità.<br>Se non basta, puoi cercare su tutto YouTube (100 unità; la stessa ricerca entro 24 ore è gratis).</p></div>`;
+  else if (searchRes) r.innerHTML = searchRes.map(card).join("");
+  else r.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
 }
 
 function renderChannels(status, isErr){
@@ -2936,7 +2939,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012222413";
+const BUILD = "20261012222937";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
