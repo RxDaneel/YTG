@@ -122,6 +122,12 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 :root[data-theme="neon"] .vprog i{background:#ff2bd6}
 :root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.lnk{color:#065fd4;text-decoration:none;word-break:break-all}
+@media (prefers-color-scheme:dark){.lnk{color:#3ea6ff}}
+:root[data-theme="carta"] .lnk{color:#065fd4}
+:root[data-theme="grafite"] .lnk,:root[data-theme="oled"] .lnk{color:#3ea6ff}
+:root[data-theme="neon"] .lnk{color:#00f0ff}
+:root[data-theme="term"] .lnk{color:#41ff74;text-decoration:underline}
 .grow{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--line)}
 .grow img{width:36px;height:36px;border-radius:50%;flex:none;background:var(--raised)}
 .grow span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
@@ -1547,6 +1553,8 @@ function renderSettings(){
       ${S.mutedTopics.length ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="unmuteAll">Temi tolti dalla Home: ${esc(S.mutedTopics.join(", "))}<small>Tocca per rimetterli tutti</small></button>` : ""}
       <label class="toggle"><div>Paese della Home e della ricerca</div>
         <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${k}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
+        <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${k}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
       <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
@@ -2021,7 +2029,7 @@ function renderWatch(){
       <span>${x.views ? views(x.views) : ""}</span><span>${ago(x.at)}</span>
       <button class="more" data-act="desc">…altro</button></div>
     <div class="vdesc" id="vDesc" hidden><b>${x.views ? x.views.toLocaleString("it-IT") + " visualizzazioni" : ""}</b> · ${new Date(x.at).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
-      <div class="d">${esc(x.desc || "Nessuna descrizione.")}</div></div>
+      <div class="d">${x.desc ? linkify(x.desc, true) : "Nessuna descrizione."}</div></div>
     <div class="vact">
       <img class="avatar" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="" data-ch="${x.ch}">
       <button class="pill${isSub(x.ch) ? " on" : ""}" id="vSub" data-act="vsub">${isSub(x.ch) ? "Iscritto" : "Iscriviti"}</button>
@@ -2150,7 +2158,7 @@ async function refreshStats(id){
     S.chap[id] = parseChapters(full);
     const ck = Object.keys(S.chap); if (ck.length > 1000) ck.slice(0, ck.length - 1000).forEach(k => delete S.chap[k]);
     save(); paintChapters(id);
-    const d = $("#vDesc .d"); if (d) d.textContent = full || "Nessuna descrizione.";
+    const d = $("#vDesc .d"); if (d) d.innerHTML = full ? linkify(full, true) : "Nessuna descrizione.";
     const tags = (it.snippet?.tags || []).slice(0, 15).map(t => t.toLowerCase());
     if (tags.length > (current.tags || []).length) { current.tags = tags; renderRelated(); }
     const l = $("#vLikes"); if (l) l.textContent = current.likes ? num(current.likes) + " Mi piace" : "";
@@ -2247,11 +2255,74 @@ function videoMenu(){
   showMenu(items);
 }
 
+/* ---------- link nelle descrizioni e nei commenti ----------
+   Video di YouTube → si aprono qui (dal punto indicato con t=). Canali → pagina del canale qui.
+   Orari tipo 4:05 → saltano a quel punto del video aperto. Tutto il resto → fuori dall'app. */
+const URL_RE = /\b((?:https?:\/\/|www\.)[^\s<>"']+[^\s<>"'.,;:!?)\]])/gi;
+function parseT(s){
+  if (!s) return 0; if (/^\d+s?$/.test(s)) return parseInt(s);
+  const m = s.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/); return m ? (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0) : 0;
+}
+function ytTarget(u){
+  let url; try { url = new URL(/^https?:/i.test(u) ? u : "https://" + u); } catch { return null; }
+  const h = url.hostname.toLowerCase().replace(/^(www\.|m\.|music\.)/, ""), q = url.searchParams, t = parseT(q.get("t") || q.get("start") || "");
+  if (h === "youtu.be") { const id = url.pathname.slice(1, 12); return /^[\w-]{11}$/.test(id) ? { v: id, t } : null; }
+  if (h !== "youtube.com" && h !== "youtube-nocookie.com") return null;
+  if (/^[\w-]{11}$/.test(q.get("v") || "")) return { v: q.get("v"), t };
+  let m = url.pathname.match(/^\/(?:shorts|live|embed|v)\/([\w-]{11})/); if (m) return { v: m[1], t };
+  m = url.pathname.match(/^\/channel\/(UC[\w-]{22})/); if (m) return { ch: m[1] };
+  m = url.pathname.match(/^\/(@[\w.\-]+)\/?/); if (m) return { handle: m[1] };
+  return null;
+}
+const BROWSERS = { "": "Automatico (decide iOS)", safari: "Safari", chrome: "Chrome", firefox: "Firefox", edge: "Edge", brave: "Brave" };
+function extHref(h){
+  switch (S.opt.browser) {
+    case "safari": return "x-safari-" + h;
+    case "chrome": return h.replace(/^https?/i, m => m.toLowerCase() === "https" ? "googlechromes" : "googlechrome");
+    case "firefox": return "firefox://open-url?url=" + encodeURIComponent(h);
+    case "edge": return "microsoft-edge-" + h;
+    case "brave": return "brave://open-url?url=" + encodeURIComponent(h);
+    default: return h;
+  }
+}
+const tSecs = t => t.split(":").reduce((a, x) => a * 60 + (+x), 0);
+const linkTimes = (h, on) => on ? h.replace(/(^|[\s(\[])((?:\d{1,2}:)?\d{1,2}:\d{2})(?=[\s)\],.:;!?\-]|$)/g, (_, a, t) => `${a}<a class="lnk" href="#" data-seek="${tSecs(t)}">${t}</a>`) : h;
+function linkify(text, times){
+  const s = String(text || ""); let out = "", last = 0;
+  for (const m of s.matchAll(URL_RE)) {
+    out += linkTimes(esc(s.slice(last, m.index)), times);
+    const u = m[1], y = ytTarget(u), href = /^https?:/i.test(u) ? u : "https://" + u;
+    const shown = u.replace(/^https?:\/\/(www\.)?/i, ""), label = esc(shown.length > 60 ? shown.slice(0, 57) + "…" : shown);
+    out += y ? `<a class="lnk" href="${esc(href)}" data-yt="${esc(JSON.stringify(y))}">${label}</a>`
+      : `<a class="lnk" href="${esc(extHref(href))}"${S.opt.browser ? "" : ` target="_blank"`} rel="noopener">${label}</a>`;
+    last = m.index + u.length;
+  }
+  return out + linkTimes(esc(s.slice(last)), times);
+}
+async function openYtLink(y){
+  try {
+    if (y.v) {
+      if (current?.id === y.v && $("#player").classList.contains("open")) { closeSheet("#cmts"); if (ok()) { yp.seekTo(y.t || 0, true); yp.playVideo(); } $("#player").scrollTop = 0; return; }
+      if (!CACHE.get(y.v)) {
+        toast("Apro il video…");
+        const det = await videoDetails([y.v]); if (!det.length) return toast("Video non disponibile");
+        remember([toVideo(det[0])]);
+      }
+      closeSheet("#cmts"); return openVideo(y.v, y.t || null);
+    }
+    if (y.ch) { closeSheet("#cmts"); return openChannel(y.ch); }
+    if (y.handle) {
+      const j = await api("channels", { part: "id", forHandle: y.handle }); const id = j.items?.[0]?.id;
+      if (!id) return toast("Canale non trovato");
+      closeSheet("#cmts"); return openChannel(id);
+    }
+  } catch (e) { toast(errMsg(e)); }
+}
 function commentHTML(c, replies){
   const s = c.snippet;
   return `<div class="cmt"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
     <div><b>${esc(s.authorDisplayName)}</b> <span class="sub">· ${ago(s.publishedAt)}${s.updatedAt !== s.publishedAt ? " (modificato)" : ""}</span>
-      <p>${esc(s.textOriginal ?? s.textDisplay)}</p>
+      <p>${linkify(s.textOriginal ?? s.textDisplay, true)}</p>
       <div class="sub">${s.likeCount ? "♥ " + s.likeCount : ""}</div>
       ${replies || ""}</div></div>`;
 }
@@ -2725,8 +2796,10 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
+  const yl = e.target.closest("a[data-yt]");
+  if (yl) { e.preventDefault(); try { openYtLink(JSON.parse(yl.dataset.yt)); } catch {} return; }
   const sk = e.target.closest("[data-seek]");
-  if (sk) { if (ok()) { yp.seekTo(+sk.dataset.seek, true); yp.playVideo(); $("#player").scrollTop = 0; } return; }
+  if (sk) { e.preventDefault(); if (sk.closest("#cmts")) closeSheet("#cmts"); if (ok()) { yp.seekTo(+sk.dataset.seek, true); yp.playVideo(); $("#player").scrollTop = 0; } return; }
   const gp = e.target.closest("[data-grp]");
   if (gp) { S.subsGroup = gp.dataset.grp; save(); subsShow = 40; renderSubs(); return toTop(); }
   const tp = e.target.closest("[data-theme-pick]");
@@ -2877,6 +2950,7 @@ document.addEventListener("submit", async e => {
 
 document.addEventListener("change", e => {
   const id = e.target.id;
+  if (id === "o_browser") { S.opt.browser = e.target.value; save(); }
   if (id === "o_prev") { S.opt.inlinePrev = e.target.checked; save(); if (!e.target.checked) stopPreview(); }
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
   if (id === "o_hsearch") { S.opt.homeSearch = e.target.checked; S.homeFetch = 0; save(); }
@@ -2939,7 +3013,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012222937";
+const BUILD = "20261012224830";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
