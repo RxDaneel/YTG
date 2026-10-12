@@ -91,6 +91,14 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .cdots svg{width:20px;height:20px;fill:currentColor}
 .thumb{position:relative;aspect-ratio:16/9;background:var(--surface);overflow:hidden;max-width:100%}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+[data-v]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+[data-v] img{-webkit-touch-callout:none;pointer-events:none}
+.prev{position:absolute;inset:0;background:#000;z-index:2}
+.prev iframe,.prev>div{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none}
+.prev .pbar{position:absolute;left:0;bottom:0;height:3px;background:#e8e6df;width:0;z-index:3;transition:width .4s linear}
+.prev .pvol{position:absolute;right:8px;top:8px;z-index:3;width:34px;height:34px;border-radius:50%;border:0;background:rgba(20,20,19,.7);display:grid;place-items:center;pointer-events:auto}
+.prev .pvol svg{width:18px;height:18px;stroke:#faf9f5;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.thumb.pressing{transform:scale(.97);transition:transform .35s ease}
 .dur{position:absolute;right:8px;bottom:8px;background:rgba(20,20,19,.82);color:#faf9f5;font-size:12px;font-weight:600;padding:2px 5px;border-radius:4px;font-variant-numeric:tabular-nums}
 .live{background:var(--danger)}
 .seen .thumb::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
@@ -1597,7 +1605,7 @@ $("#cSeek").addEventListener("change", e => {
   seeking = false; ctlShow();
 });
 paintCtl();
-async function startPlayer(id){
+async function startPlayer(id, start){
   stopPlayer();
   $("#pFrame").innerHTML = `<div id="ytp"></div>`;
   ccOn = !!S.opt.cc; paintCC();
@@ -1605,7 +1613,7 @@ async function startPlayer(id){
   if (current?.id !== id) return;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3,
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3, ...(start > 0 ? { start: Math.floor(start) } : {}),
       ...(S.opt.cc ? { cc_load_policy: 1, cc_lang_pref: S.opt.cc } : {}) },
     events: {
       onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) ctlShow(true); else if (e.data === 1) ctlShow(); },
@@ -1737,12 +1745,71 @@ const ICON = {
 const num = n => !n ? "0" : n >= 1e6 ? (n/1e6).toFixed(1).replace(".0","").replace(".",",") + " Mln" : n >= 1e3 ? (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(".0","").replace(".",",") + "K" : String(n);
 let myRating = "none", cLoadedFor = "", statsFor = "";
 
-function openVideo(id){
+/* ---------- anteprima: tieni premuto su un video ----------
+   Dopo mezzo secondo parte muto dentro la miniatura (da circa il 10% del video, per saltare le intro).
+   Continua anche lasciando il dito; si ferma scorrendo via, cambiando scheda o aprendo un altro video.
+   Toccandolo si apre il video dallo stesso punto. Non costa unità. */
+const PV = { id: "", el: null, yp: null, t0: 0, start: 0, timer: 0, fired: false, x: 0, y: 0, obs: null, bar: 0 };
+const pvTime = () => { try { return PV.yp?.getCurrentTime?.() || PV.start; } catch { return PV.start; } };
+function stopPreview(){
+  clearInterval(PV.bar); PV.obs?.disconnect();
+  try { PV.yp?.destroy(); } catch {}
+  PV.el?.querySelector(".prev")?.remove();
+  Object.assign(PV, { id: "", el: null, yp: null, obs: null });
+}
+async function startPreview(card, id){
+  stopPreview();
+  const x = CACHE.get(id), th = card.querySelector(".thumb"); if (!x || !th) return;
+  PV.id = id; PV.el = th; PV.start = x.dur > 120 ? Math.round(x.dur * .1) : 0;
+  th.insertAdjacentHTML("beforeend", `<div class="prev"><div id="pvp"></div><div class="pbar"></div>
+    <span class="pvol" role="button" data-act="pvVol" aria-label="Audio">${CI.mute}</span></div>`);
+  PV.obs = new IntersectionObserver(es => { if (es[0] && es[0].intersectionRatio < .5) stopPreview(); }, { threshold: [0, .5] });
+  PV.obs.observe(th);
+  const YT = await loadYTApi(); if (PV.id !== id) return;
+  PV.yp = new YT.Player("pvp", { width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
+    playerVars: { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, iv_load_policy: 3, fs: 0, disablekb: 1, start: PV.start },
+    events: { onReady: e => { if (PV.id !== id) return; e.target.mute(); e.target.playVideo(); },
+      onStateChange: e => { if (e.data === 0 && PV.id === id) stopPreview(); } } });
+  PV.bar = setInterval(() => {
+    if (PV.id !== id || !PV.yp?.getDuration) return;
+    const d = PV.yp.getDuration() || x.dur || 0, b = th.querySelector(".pbar");
+    if (b && d) b.style.width = Math.min(100, pvTime() / d * 100) + "%";
+  }, 400);
+}
+function pvVol(){
+  const y = PV.yp; if (!y?.isMuted) return;
+  if (y.isMuted()) { y.unMute(); y.setVolume(100); } else y.mute();
+  const b = PV.el?.querySelector(".pvol"); if (b) b.innerHTML = y.isMuted() ? CI.mute : CI.vol;
+}
+(() => {
+  const main = document.getElementById("main");
+  main.addEventListener("touchstart", e => {
+    const card = e.target.closest("[data-v]"); clearTimeout(PV.timer); PV.fired = false;
+    if (!card || e.touches.length > 1 || e.target.closest(".pvol,.cdots,[data-ch]") || !card.querySelector(".thumb")) return;
+    PV.x = e.touches[0].clientX; PV.y = e.touches[0].clientY;
+    const th = card.querySelector(".thumb");
+    PV.timer = setTimeout(() => {
+      PV.fired = true; th.classList.add("pressing"); setTimeout(() => th.classList.remove("pressing"), 350);
+      if (PV.id !== card.dataset.v) startPreview(card, card.dataset.v);
+    }, 450);
+  }, { passive: true });
+  main.addEventListener("touchmove", e => {
+    if (Math.hypot(e.touches[0].clientX - PV.x, e.touches[0].clientY - PV.y) > 10) clearTimeout(PV.timer);
+  }, { passive: true });
+  main.addEventListener("touchend", () => clearTimeout(PV.timer), { passive: true });
+  main.addEventListener("touchcancel", () => clearTimeout(PV.timer), { passive: true });
+  // il tocco che ha fatto partire l'anteprima non deve anche aprire il video
+  document.addEventListener("click", e => { if (PV.fired) { PV.fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  document.addEventListener("contextmenu", e => { if (e.target.closest("[data-v]")) e.preventDefault(); });
+})();
+function openVideo(id, start){
   const x = CACHE.get(id); if (!x) return;
+  if (start == null && PV.id === id) start = pvTime();          // dall'anteprima: riprende dallo stesso punto
+  stopPreview();
   $("#notifs").classList.remove("open"); closeSheet("#cmts");
   current = x; myRating = "none"; S.watched[id] = Date.now();
   S.hist = [{ cat: x.cat, ch: x.ch, tags: x.tags || [] }].concat(S.hist.filter((_, i) => i < 149)); save();
-  startPlayer(id);
+  startPlayer(id, start);
   $("#pExt").href = "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
   renderWatch();
   $("#cIn").placeholder = S.clientId ? "Aggiungi un commento…" : "Configura l'accesso Google per commentare";
@@ -2392,6 +2459,7 @@ function rerender(){
   else if (tab === "vMe") renderMe();
 }
 function go(t){
+  stopPreview();
   if (t === "vHome" && !S.opt.showHome) t = "vSubs";
   tab = t;
   document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== t);
@@ -2479,6 +2547,7 @@ document.addEventListener("click", e => {
   if (a === "laterCur") { closeMenu(); return toggleLater(current, true); }
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
+  if (a === "pvVol") { e.stopPropagation(); return pvVol(); }
   if (a === "laterImp") { ME.laterImp = !ME.laterImp; ME.laterMsg = ""; return renderMe(); }
   if (a === "plMore") { ME.plShow = (ME.plShow || 60) + 100; return renderMe(); }
   if (a === "laterMore") { ME.laterShow = (ME.laterShow || 60) + 100; return renderMe(); }
@@ -2621,7 +2690,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012005846";
+const BUILD = "20261012010519";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
