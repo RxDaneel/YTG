@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="YTG">
 <meta name="theme-color" content="#1a1a19">
+<script>try{var t=localStorage.getItem("ytg.theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=3">
 <link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png?v=3">
 <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png?v=3">
@@ -33,6 +34,20 @@
   --fg:#f5f4ef; --muted:#9c9a92; --accent:#d9d7d1; --on-accent:#1a1a19; --danger:#e06060;
   --glass:rgba(26,26,25,.92); color-scheme:dark;
 }}
+/* temi scelti nelle impostazioni (prevalgono su chiaro/scuro automatico) */
+:root[data-theme="grafite"]{--bg:#1a1a19;--surface:#242422;--raised:#2e2e2b;--line:#353532;--fg:#f5f4ef;--muted:#9c9a92;--accent:#d9d7d1;--on-accent:#1a1a19;--danger:#e06060;--glass:rgba(26,26,25,0.92);color-scheme:dark}
+:root[data-theme="carta"]{--bg:#f3f1ea;--surface:#e9e6dc;--raised:#dfdbcf;--line:#d6d1c4;--fg:#141413;--muted:#65635c;--accent:#3b3b38;--on-accent:#f5f4ef;--danger:#c43c3c;--glass:rgba(243,241,234,0.92);color-scheme:light}
+:root[data-theme="oled"]{--bg:#000000;--surface:#0e0e0e;--raised:#1a1a1a;--line:#232323;--fg:#f2f2f2;--muted:#8c8c8c;--accent:#e6e6e6;--on-accent:#000000;--danger:#e06060;--glass:rgba(0,0,0,0.92);color-scheme:dark}
+:root[data-theme="notte"]{--bg:#0f1420;--surface:#172033;--raised:#1f2a40;--line:#283450;--fg:#e8edf7;--muted:#8d9ab3;--accent:#8fb4ff;--on-accent:#0f1420;--danger:#ff7a7a;--glass:rgba(15,20,32,0.92);color-scheme:dark}
+:root[data-theme="foresta"]{--bg:#121815;--surface:#1a221d;--raised:#232d27;--line:#2c3831;--fg:#eef2ec;--muted:#93a196;--accent:#9fcfa8;--on-accent:#121815;--danger:#e57373;--glass:rgba(18,24,21,0.92);color-scheme:dark}
+:root[data-theme="lavanda"]{--bg:#17141f;--surface:#201c2b;--raised:#2a2538;--line:#342e46;--fg:#f0ecf7;--muted:#9d95ad;--accent:#c4b0f5;--on-accent:#17141f;--danger:#f07a8a;--glass:rgba(23,20,31,0.92);color-scheme:dark}
+:root[data-theme="seppia"]{--bg:#f4ecdf;--surface:#eadfcd;--raised:#dfd1ba;--line:#d3c3a6;--fg:#2b2118;--muted:#7a6a58;--accent:#8a5a2b;--on-accent:#fbf6ee;--danger:#b0412e;--glass:rgba(244,236,223,0.92);color-scheme:light}
+:root[data-theme="oceano"]{--bg:#eef4f6;--surface:#e1ebef;--raised:#d2e0e6;--line:#c4d5dd;--fg:#10242c;--muted:#587079;--accent:#1f6f8b;--on-accent:#f2f8fa;--danger:#c0443c;--glass:rgba(238,244,246,0.92);color-scheme:light}
+.themes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px}
+.themes button{border:1.5px solid var(--line);border-radius:12px;padding:10px 6px 8px;background:var(--surface);color:var(--fg);font:500 12.5px var(--font);display:flex;flex-direction:column;align-items:center;gap:7px}
+.themes button[aria-pressed="true"]{border-color:var(--fg)}
+.themes .sw{width:44px;height:44px;border-radius:50%;border:1px solid rgba(128,128,128,.35);position:relative;overflow:hidden}
+.themes .sw i{position:absolute;right:0;bottom:0;width:50%;height:50%}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
 /* la pagina non scorre mai: scorre solo <main>. Così su iPhone le barre non possono "staccarsi" (succedeva dopo tastiera o rotazione) */
@@ -1380,6 +1395,30 @@ function renderChannels(status, isErr){
 const REGIONS = { IT: "Italia", US: "Stati Uniti", GB: "Regno Unito", DE: "Germania", FR: "Francia", ES: "Spagna", JP: "Giappone" };
 const regionName = c => REGIONS[c] || c;
 
+const THEMES = {
+  auto: { name: "Automatico", bg: "#f3f1ea", su: "#1a1a19", ac: "#9c9a92" },
+  grafite: { name: "Grafite", bg: "#1a1a19", su: "#2e2e2b", ac: "#d9d7d1" },
+  carta: { name: "Carta", bg: "#f3f1ea", su: "#dfdbcf", ac: "#3b3b38" },
+  oled: { name: "Nero OLED", bg: "#000000", su: "#1a1a1a", ac: "#e6e6e6" },
+  notte: { name: "Notte", bg: "#0f1420", su: "#1f2a40", ac: "#8fb4ff" },
+  foresta: { name: "Foresta", bg: "#121815", su: "#232d27", ac: "#9fcfa8" },
+  lavanda: { name: "Lavanda", bg: "#17141f", su: "#2a2538", ac: "#c4b0f5" },
+  seppia: { name: "Seppia", bg: "#f4ecdf", su: "#dfd1ba", ac: "#8a5a2b" },
+  oceano: { name: "Oceano", bg: "#eef4f6", su: "#d2e0e6", ac: "#1f6f8b" }
+};
+function applyTheme(t){
+  t = THEMES[t] ? t : "auto";
+  if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  try { t === "auto" ? localStorage.removeItem("ytg.theme") : localStorage.setItem("ytg.theme", t); } catch {}
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg || "#1a1a19");
+}
+applyTheme(S.opt.theme);
+function themePicker(){
+  const cur = S.opt.theme || "auto";
+  return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${k}" aria-pressed="${k === cur}">
+    <span class="sw" style="background:${k === "auto" ? `linear-gradient(135deg,${t.bg} 50%,${t.su} 50%)` : t.bg}"><i style="background:${k === "auto" ? "transparent" : t.ac}"></i></span>${t.name}</button>`).join("")}</div></div>`;
+}
 function renderSettings(){
   const v = $("#vSettings"), o = S.opt;
   const masked = S.key ? S.key.slice(0, 6) + "…" + S.key.slice(-4) : "";
@@ -1393,6 +1432,8 @@ function renderSettings(){
     ${S.me ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="pickAccount">Cambia account<small>Scegli l'account Google e il canale con le tue iscrizioni</small></button>` : ""}
     </div>
 
+    <h2 style="margin-top:22px">Tema</h2>
+    ${themePicker()}
     <h2 style="margin-top:22px">Contenuti</h2>
     <div class="panel">
       <label class="toggle"><div>Mostra la Home<small>Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
@@ -2504,6 +2545,8 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
+  const tp = e.target.closest("[data-theme-pick]");
+  if (tp) { S.opt.theme = tp.dataset.themePick; save(); applyTheme(S.opt.theme); return renderSettings(); }
   const t = e.target.closest("[data-mute],[data-cm],[data-nv],[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
   if (t.dataset.mute) return muteTopic(t.dataset.mute);
   if (t.dataset.cm) return cardMenu(t.dataset.cm);
@@ -2706,7 +2749,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012011254";
+const BUILD = "20261012011541";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
