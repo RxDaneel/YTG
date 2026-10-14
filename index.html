@@ -1297,10 +1297,42 @@ function localSearch(q){
 }
 /* Ricerca come su YouTube: va subito su tutto YouTube (100 unità, costo fisso di Google).
    Gratis se la stessa ricerca è stata fatta nelle ultime 24 ore (anche dalla Home). Senza unità: solo tra i video già noti. */
+/* ---------- ordine dei risultati ----------
+   YouTube li restituisce per "pertinenza" (che premia i video popolari, spesso vecchi). Qui, gratis:
+   1) quelli che non contengono abbastanza parole della ricerca vanno in fondo; 2) video in altre lingue tolti;
+   3) "Più recenti": i pertinenti dal più nuovo; "Più pertinenti": per parole trovate, poi l'ordine di YouTube.
+   Il periodo filtra i 50 risultati; se ne restano pochi si può cercare solo in quel periodo (100 unità). */
+let sRange = "", sRangeYT = "";
+const RANGES = { "": "Sempre", w: "Settimana", m: "Mese", y: "Anno" };
+const rangeFrom = r => new Date(Date.now() - ({ w: 7, m: 31, y: 366 }[r] || 0) * 864e5).toISOString();
+const normTxt = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function rankSearch(list, q){
+  const ws = [...new Set(normTxt(q).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 1 && !STOPW.has(w)))];
+  const need = ws.length ? Math.max(1, Math.ceil(ws.length * .5)) : 0, since = sRange ? Date.parse(rangeFrom(sRange)) : 0;
+  const scored = list.filter(v => langOk(v) && (!since || Date.parse(v.at) >= since)).map((v, i) => {
+    const hay = normTxt(v.title + " " + (v.tags || []).join(" ") + " " + (v.chTitle || "") + " " + (v.desc || ""));
+    const tit = normTxt(v.title);
+    let hit = 0, inTitle = 0;
+    for (const w of ws) { if (hay.includes(w)) hit++; if (tit.includes(w)) inTitle++; }
+    return { v, i, hit, inTitle, ok: hit >= need };
+  });
+  const recent = (S.opt.sSort || "recent") === "recent";
+  const cmp = (a, b) => recent ? b.v.at.localeCompare(a.v.at) : (b.hit - a.hit) || (b.inTitle - a.inTitle) || (a.i - b.i);
+  return { good: scored.filter(x => x.ok).sort(cmp).map(x => x.v), weak: scored.filter(x => !x.ok).sort((a, b) => a.i - b.i).map(x => x.v) };
+}
+function searchToolbar(){
+  const sort = S.opt.sSort || "recent";
+  return `<div class="chips" style="padding-top:8px">
+    <button class="chip chipq${sort === "recent" ? " on" : ""}" data-ssort="recent" style="padding:7px 13px">Più recenti</button>
+    <button class="chip chipq${sort === "rel" ? " on" : ""}" data-ssort="rel" style="padding:7px 13px">Più pertinenti</button>
+    <span style="width:1px;background:var(--line);margin:4px 2px;flex:none"></span>
+    ${Object.entries(RANGES).map(([k, n]) => `<button class="chip chipq${sRange === k ? " on" : ""}" data-srange="${k}" style="padding:7px 13px">${n}</button>`).join("")}</div>`;
+}
 function doSearch(q){
   q = (q || "").trim(); if (!q) return;
   const y = ytTarget(q.match(URL_RE)?.[0] || "");            // un link di YouTube: apro direttamente il video o il canale
   if (y) { const i = $("#sIn"); if (i) i.value = ""; return openYtLink(y); }
+  if (q !== searchQ) { sRange = ""; sRangeYT = ""; }
   searchQ = q;
   addSearchHist(searchQ);
   searchErr = ""; searchYT = false;
@@ -1313,7 +1345,12 @@ function doSearch(q){
 async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
   searchBusy = true; searchErr = ""; renderSearch();
-  try { const r = await searchVideos(searchQ, 50); searchRes = r.list; searchYT = true; searchLocal = null; ensureAvatars(searchRes); }
+  try {
+    // lingua: italiano solo se la ricerca è scritta in italiano, altrimenti nessuna preferenza (prima era sempre italiano)
+    const extra = { ...(textLang(searchQ) === "it" ? { relevanceLanguage: "it" } : {}), ...(sRangeYT ? { publishedAfter: rangeFrom(sRangeYT) } : {}) };
+    const r = await searchVideos(searchQ, 50, extra, sRangeYT ? "p" + sRangeYT + ":" : "");
+    searchRes = r.list; searchYT = true; searchLocal = null; ensureAvatars(searchRes);
+  }
   catch (e) { searchErr = errMsg(e); }
   finally { searchBusy = false; renderSearch(); }
 }
@@ -1502,8 +1539,14 @@ function renderSearch(){
       ? `<div class="group">Tra i video che YTG conosce già · 0 unità</div>` + searchLocal.map(card).join("")
       : `<div class="empty"><p>Nessun video già noto contiene “${esc(searchQ)}”.</p></div>`);
   else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
-  else if (searchRes && !searchRes.length) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
-  else if (searchRes) r.innerHTML = searchRes.map(card).join("");
+  else if (searchRes && !searchRes.length && !sRangeYT) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
+  else if (searchRes) {
+    const { good, weak } = rankSearch(searchRes, searchQ);
+    const few = sRange && sRange !== sRangeYT && good.length < 8 && !quotaOut()
+      ? `<div style="padding:10px 16px 14px"><button class="btn ghost" data-act="searchRange" style="font-size:13px;padding:8px 14px">Cerca su YouTube solo video dell'ultim${sRange === "w" ? "a settimana" : sRange === "m" ? "o mese" : "o anno"} · ${searchCached(searchQ, "p" + sRange + ":") ? "gratis" : "100 unità"}</button></div>` : "";
+    r.innerHTML = searchToolbar() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
+      + (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : "");
+  }
   else r.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
 }
 
@@ -2948,6 +2991,15 @@ document.addEventListener("click", e => {
   if (mk) return openMark(mk.dataset.mark);
   const um = e.target.closest("[data-unmark]");
   if (um) { S.marks = S.marks.filter(m => markKey(m) !== um.dataset.unmark); save(); return renderMe(); }
+  const ss = e.target.closest("[data-ssort]");
+  if (ss) { S.opt.sSort = ss.dataset.ssort; save(); renderSearch(); return toTop(); }
+  const sr = e.target.closest("[data-srange]");
+  if (sr) {
+    sRange = sr.dataset.srange;
+    if (sRangeYT && sRange !== sRangeYT) { sRangeYT = ""; const c = searchCached(searchQ, ""); if (c) searchRes = c; }   // torno ai risultati generali
+    if (sRange && searchCached(searchQ, "p" + sRange + ":")) { sRangeYT = sRange; searchRes = searchCached(searchQ, "p" + sRange + ":"); }
+    renderSearch(); return toTop();
+  }
   const hq = e.target.closest("[data-hq]");
   if (hq) { const q = hq.dataset.hq; $("#sIn").value = q; sFocus = false; $("#sIn").blur(); return doSearch(q); }
   const hx = e.target.closest("[data-hx]");
@@ -3055,6 +3107,7 @@ document.addEventListener("click", e => {
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
   if (a === "relSearch") searchRelated();
   if (a === "searchYT") return doSearchYT();
+  if (a === "searchRange") { sRangeYT = sRange; return doSearchYT(); }
   if (a === "openComments") return openComments();
   if (/^c(Play|Back|Fwd|Mute|Rate|Full)$/.test(a)) return ctl(a);
   if (a === "ctlShow") return ctlShow();
@@ -3182,7 +3235,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261012233040";
+const BUILD = "20261014181316";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
