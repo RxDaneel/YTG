@@ -75,11 +75,17 @@ a{color:var(--fg)}
 header{position:relative;flex:none;z-index:20;background:var(--bg);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:calc(var(--top) + 6px) 8px 6px 16px;
   display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--line)}
-header h1{font:700 22px/1.2 var(--serif);margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
+header h1{font:700 22px/1.2 var(--serif);margin:0;flex:none;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:9px}
 .logo{border:0;background:none;padding:4px 6px 4px 0;color:var(--muted);flex:none;display:flex;align-items:center}
 .logo svg{width:42px;height:26px;display:block}
 .logo:active{opacity:.6}
-#hTitle{font-size:14px;font-weight:500;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+#hTitle{display:none}
+/* barra di ricerca nella barra in alto */
+.hsearch{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:38px;margin:0 4px 0 2px;padding:0 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line)}
+.hsearch:focus-within{border-color:var(--accent)}
+.hsearch svg{width:17px;height:17px;flex:none;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round}
+.hsearch input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--fg);font:16px var(--font);padding:0;height:100%}
+.hsearch input::placeholder{color:var(--muted)}
 /* barretta delle unità usate oggi, al posto della linea sotto la barra in alto */
 #qbar{position:absolute;left:0;right:0;bottom:-2px;height:12px;border:0;padding:0;background:none;cursor:pointer;z-index:1}
 #qbar::before{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--line)}
@@ -365,7 +371,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <header>
   <button id="qbar" data-act="qinfo" aria-label="Unità usate oggi"><i id="qfill"></i></button>
   <h1><button class="logo" id="logo" aria-label="YTG, vai alla Home"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M5 4.2v15.6L18.6 12z" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><rect x="24" y="10.2" width="12" height="3.6" rx="1.8" fill="currentColor"/></svg></button><span id="hTitle"></span></h1>
-  <button class="icon-btn" id="btnSearch" aria-label="Cerca"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+  <form id="sForm" class="hsearch" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca" autocomplete="off" autocorrect="off" aria-label="Cerca su YouTube"></form>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
   <button class="icon-btn" id="btnGear" aria-label="Impostazioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -1505,6 +1511,17 @@ function renderSubs(){
 
 /* ---------- cronologia delle ricerche ---------- */
 let sFocus = false;
+/* la barra in alto: toccandola si apre la pagina Cerca con le ricerche recenti */
+(() => {
+  const inp = document.getElementById("sIn");
+  inp.addEventListener("focus", () => {
+    sFocus = true;
+    if (tab !== "vSearch") { go("vSearch"); inp.value = searchQ; setTimeout(() => inp.select?.(), 0); }
+    renderSearch();
+  });
+  inp.addEventListener("input", () => { if (sFocus && tab === "vSearch") renderSearch(); });
+  inp.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== inp) { sFocus = false; if (tab === "vSearch") renderSearch(); } }, 250));
+})();
 function addSearchHist(q){
   S.sHist = [q].concat((S.sHist || []).filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30); save();
 }
@@ -1519,14 +1536,7 @@ function histHTML(filter){
 }
 function renderSearch(){
   const v = $("#vSearch");
-  if (!v.querySelector("#sForm")) {
-    v.innerHTML = `<form class="searchbar" id="sForm"><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca su YouTube" autocomplete="off">
-      <button class="btn" type="submit">Cerca</button></form><div id="sRes"></div>`;
-    const inp = $("#sIn");
-    inp.addEventListener("focus", () => { sFocus = true; renderSearch(); });
-    inp.addEventListener("input", () => { if (sFocus) renderSearch(); });
-    inp.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== inp) { sFocus = false; renderSearch(); } }, 250));
-  }
+  if (!v.querySelector("#sRes")) v.innerHTML = `<div id="sRes"></div>`;
   const r = $("#sRes");
   // mentre scrivi (o se non hai ancora cercato niente) compaiono le ricerche recenti
   const hist = sFocus || (!searchQ && !searchBusy) ? histHTML(sFocus ? $("#sIn").value : "") : "";
@@ -2968,7 +2978,8 @@ function go(t){
   $("#btnGear").classList.toggle("on", t === "vSettings");
   if (t === "vHome") { renderHome(); if (S.key && !quotaOut() && Date.now() - S.homeFetch > 15 * 60000) loadHome(false, false, true); }
   if (t === "vSubs") { subsShow = 40; renderSubs(); if (!quotaOut() && Date.now() - S.lastFetch > 2 * 3600000) refresh(); }
-  if (t === "vSearch") { renderSearch(); setTimeout(() => $("#sIn")?.focus(), 50); }
+  if (t === "vSearch") renderSearch();
+  else { const i = $("#sIn"); if (i && document.activeElement !== i) i.value = ""; }
   if (t === "vChannels") renderChannels();
   if (t === "vMe") { ME.pl = null; renderMe(); if (Date.now() - (S.meData?.at || 0) > 24 * 3600000) loadMe(); }
   if (t === "vSettings") renderSettings();
@@ -3193,7 +3204,6 @@ $("#csvFile").addEventListener("change", async e => {
 });
 
 $("#btnRefresh").onclick = () => tab === "vHome" ? loadHome(true) : tab === "vMe" ? loadMe(true) : refresh(true);
-$("#btnSearch").onclick = () => go("vSearch");
 $("#btnBell").onclick = openNotifs;
 document.querySelectorAll("nav button[data-tab]").forEach(b => b.addEventListener("touchend", e => {
   e.preventDefault(); e.stopPropagation(); fixViewport(); closeSheets(); go(b.dataset.tab);
@@ -3235,7 +3245,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261014181316";
+const BUILD = "20261014181702";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
