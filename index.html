@@ -957,9 +957,24 @@ async function searchVideos(q, max, extra, tag){
   const det = ids.length ? await videoDetails(ids) : [], order = new Map(ids.map((id, i) => [id, i]));
   const list = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration)))
     .sort((a, b) => order.get(a.id) - order.get(b.id)).map(toVideo));
-  sc[key] = { at: Date.now(), list };
+  sc[key] = { at: Date.now(), list, pages: [list.length], next: j.nextPageToken || "", extra: extra || null, max };
   Object.keys(sc).sort((a, b) => sc[b].at - sc[a].at).slice(40).forEach(k => delete sc[k]);
   save(); return { list, cached: false };
+}
+/* pagina successiva di una ricerca già fatta (100 unità, costo fisso di Google): si aggiunge in coda e resta salvata 24 ore */
+async function searchMoreVideos(q, tag){
+  const key = searchKey(q, tag), hit = S.sCache[key];
+  if (!hit?.next) return null;
+  const j = await api("search", { part: "id", q, type: "video", maxResults: hit.max || 50, regionCode: S.opt.region, safeSearch: "none",
+    ...(hit.extra || { relevanceLanguage: "it" }), pageToken: hit.next });
+  const have = new Set(hit.list.map(v => v.id));
+  const ids = (j.items || []).map(i => i.id.videoId).filter(id => id && !have.has(id));
+  const det = ids.length ? await videoDetails(ids) : [], order = new Map(ids.map((id, i) => [id, i]));
+  const add = remember(det.filter(v => v.snippet.liveBroadcastContent !== "upcoming" && !looksShort(v, secs(v.contentDetails.duration)))
+    .sort((a, b) => order.get(a.id) - order.get(b.id)).map(toVideo));
+  hit.list = hit.list.concat(add); hit.pages = (hit.pages || [hit.list.length - add.length]).concat(add.length);
+  hit.next = j.nextPageToken || ""; save();
+  return add;
 }
 
 /* Home "Per te": YouTube non dà i consigliati personali via API, quindi li ricostruiamo dai tuoi segnali:
@@ -1330,6 +1345,20 @@ function rankSearch(list, q){
   const cmp = (a, b) => recent ? b.v.at.localeCompare(a.v.at) : (b.hit - a.hit) || (b.inTitle - a.inTitle) || (a.i - b.i);
   return { good: scored.filter(x => x.ok).sort(cmp).map(x => x.v), weak: scored.filter(x => !x.ok).sort((a, b) => a.i - b.i).map(x => x.v) };
 }
+/* scorrendo in fondo si caricano da soli altri 50 risultati (100 unità ciascuna pagina);
+   oltre 7.000 unità usate oggi serve toccare il pulsante, per non finire le unità per sbaglio */
+let sMoreBusy = false;
+const searchRangeOnly = () => sRange && sRange !== sRangeYT;     // con un periodo filtrato sui risultati, niente pagine in più
+async function moreSearch(auto){
+  if (sMoreBusy || searchBusy || !searchRes || !searchQ || quotaOut()) return;
+  if (auto && usedToday() > 7000) return;
+  const tag = sRangeYT ? "p" + sRangeYT + ":" : "", hit = S.sCache[searchKey(searchQ, tag)];
+  if (!hit?.next || searchRangeOnly() || hit.list.length !== searchRes.length) return;
+  sMoreBusy = true; renderSearch();
+  try { await searchMoreVideos(searchQ, tag); searchRes = remember(S.sCache[searchKey(searchQ, tag)].list); ensureAvatars(searchRes); }
+  catch (e) { toast(errMsg(e)); }
+  finally { sMoreBusy = false; renderSearch(); }
+}
 function searchToolbar(){
   const sort = S.opt.sSort || "recent";
   return `<div class="chips" style="padding-top:8px">
@@ -1445,6 +1474,7 @@ document.getElementById("main").addEventListener("scroll", e => {
   const near = m.scrollTop + m.clientHeight > m.scrollHeight - 900;
   if (tab === "vHome" && near) moreHome();
   if (tab === "vSubs" && near && subsShow < S.videos.length) { subsShow += 40; renderSubs(); }
+  if (tab === "vSearch" && near && !sFocus) moreSearch(true);
 }, { passive: true });
 
 let subsShow = 40;
@@ -1560,11 +1590,17 @@ function renderSearch(){
   else if (searchErr) r.innerHTML = `<div class="empty"><p class="status err">Errore: ${esc(searchErr)}</p></div>`;
   else if (searchRes && !searchRes.length && !sRangeYT) r.innerHTML = `<div class="empty"><h2>Nessun risultato</h2><p>Prova con altre parole.</p></div>`;
   else if (searchRes) {
-    const { good, weak } = rankSearch(searchRes, searchQ);
+    const tag = sRangeYT ? "p" + sRangeYT + ":" : "", hit = S.sCache[searchKey(searchQ, tag)];
+    const sizes = hit && hit.list.length === searchRes.length && hit.pages ? hit.pages : [searchRes.length];
+    let good = [], weak = [], off = 0;
+    for (const n of sizes) { const r = rankSearch(searchRes.slice(off, off + n), searchQ); good = good.concat(r.good); weak = weak.concat(r.weak); off += n; }
+    const more = hit?.next && !searchRangeOnly();
+    const tail = sMoreBusy ? `<div class="status" style="padding:16px;text-align:center">Carico altri risultati…</div>`
+      : more ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="searchMore" style="font-size:13px;padding:8px 14px">Altri risultati · 100 unità</button></div>` : "";
     const few = sRange && sRange !== sRangeYT && good.length < 8 && !quotaOut()
       ? `<div style="padding:10px 16px 14px"><button class="btn ghost" data-act="searchRange" style="font-size:13px;padding:8px 14px">Cerca su YouTube solo video dell'ultim${sRange === "w" ? "a settimana" : sRange === "m" ? "o mese" : "o anno"} · ${searchCached(searchQ, "p" + sRange + ":") ? "gratis" : "100 unità"}</button></div>` : "";
     r.innerHTML = searchToolbar() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
-      + (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : "");
+      + (more ? tail : (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : ""));
   }
   else r.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
 }
@@ -3127,6 +3163,7 @@ document.addEventListener("click", e => {
   if (a === "openYT") { closeMenu(); window.open("https://www.youtube.com/watch?v=" + current.id, "_blank"); }
   if (a === "relSearch") searchRelated();
   if (a === "searchYT") return doSearchYT();
+  if (a === "searchMore") return moreSearch(false);
   if (a === "searchRange") { sRangeYT = sRange; return doSearchYT(); }
   if (a === "openComments") return openComments();
   if (/^c(Play|Back|Fwd|Mute|Rate|Full)$/.test(a)) return ctl(a);
@@ -3254,7 +3291,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261014182052";
+const BUILD = "20261014182404";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
