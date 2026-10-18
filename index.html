@@ -132,6 +132,8 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 :root[data-theme="neon"] .vprog i{background:#ff2bd6}
 :root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.cmt.hl{background:var(--raised);border-radius:12px;box-shadow:0 0 0 6px var(--raised);animation:hlflash 1.6s ease 1}
+@keyframes hlflash{0%,30%{box-shadow:0 0 0 6px var(--accent)}100%{box-shadow:0 0 0 6px var(--raised)}}
 .sbars{display:flex;gap:8px;align-items:flex-end;height:90px;margin-top:14px}
 .sbar{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
 .sbar i{display:block;width:100%;max-width:28px;background:var(--raised);border-radius:4px 4px 2px 2px}
@@ -1839,13 +1841,13 @@ async function loadNotifs(force){
     for (const t of onMine.items || []) {
       const c = t.snippet.topLevelComment.snippet;
       if (c.authorChannelId?.value === me) continue;
-      out.push({ k: "c", id: t.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
+      out.push({ k: "c", id: t.id, tid: t.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
     }
     for (const t of threads.items || []) {
       for (const r of t.replies?.comments || []) {
         const c = r.snippet;
         if (me && c.authorChannelId?.value === me) continue;
-        out.push({ k: "r", id: r.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
+        out.push({ k: "r", id: r.id, tid: t.id, who: c.authorDisplayName, pic: c.authorProfileImageUrl, text: c.textOriginal ?? c.textDisplay, at: c.publishedAt, v: t.snippet.videoId });
       }
     }
     out.sort((a, b) => b.at.localeCompare(a.at));
@@ -1859,7 +1861,7 @@ async function loadNotifs(force){
 function renderNotifs(){
   const list = S.notifs || [], seen = S.nSeenShown || 0;
   const loggedOut = !S.myChId && !S.meData?.chan && !(S.myComments || []).length;
-  $("#nList").innerHTML = followBox() + (list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}">
+  $("#nList").innerHTML = followBox() + (list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}" data-nt="${esc(n.tid || String(n.id || "").split(".")[0])}" data-nc="${esc(n.id || "")}">
       <img class="avatar" loading="lazy" src="${esc(n.pic)}" alt="" style="width:36px;height:36px">
       <div style="flex:1"><div class="title" style="font-size:13.5px;-webkit-line-clamp:3"><b>${esc(n.who)}</b> ${n.k === "r" ? "ha risposto al tuo commento" : "ha commentato"} su “${esc(n.vt)}”: ${esc(n.text)}</div>
         <div class="sub">${ago(n.at)}</div></div>
@@ -2370,6 +2372,30 @@ async function searchRelated(){
 }
 
 /* i commenti si scaricano (1 unità) solo quando li apri */
+/* dalla notifica: in cima ai commenti la conversazione intera (commento + tutte le risposte, 2 unità),
+   con il commento della notifica evidenziato; sotto gli altri commenti come sempre */
+async function openThread(tid, cid){
+  if (!current) return;
+  const vid = current.id;
+  cLoadedFor = vid; cPage = "";
+  $("#cList").innerHTML = `<div id="cFocus"><div class="status">Carico la conversazione…</div></div><div class="group">Altri commenti</div><div id="cRest"><div class="status">Carico i commenti…</div></div>`;
+  $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : "");
+  openSheet("#cmts");
+  loadComments(true);
+  try {
+    const [th, rp] = await Promise.all([
+      api("commentThreads", { part: "snippet", id: tid, textFormat: "plainText" }),
+      api("comments", { part: "snippet", parentId: tid, maxResults: 100, textFormat: "plainText" }).catch(() => ({ items: [] }))
+    ]);
+    if (current?.id !== vid) return;
+    const t = th.items?.[0]; if (!t) throw new Error("La conversazione non c'è più (forse il commento è stato eliminato).");
+    const reps = (rp.items || []).sort((a, b) => a.snippet.publishedAt.localeCompare(b.snippet.publishedAt));
+    $("#cFocus").innerHTML = `<div class="group">La conversazione</div>` + commentHTML(t.snippet.topLevelComment, reps.length ? `<div class="replies">${reps.map(c => commentHTML(c)).join("")}</div>` : "");
+    const el = (cid && $("#cFocus").querySelector(`[data-cid="${CSS.escape(cid)}"]`)) || $("#cFocus .cmt");
+    el?.classList.add("hl");
+    setTimeout(() => el?.scrollIntoView({ block: "center", behavior: "smooth" }), 150);
+  } catch (e) { const f = $("#cFocus"); if (f) f.innerHTML = `<div class="status err">${esc(e.message || errMsg(e))}</div>`; }
+}
 function openComments(){
   if (!current) return;
   if (cLoadedFor !== current.id) { cLoadedFor = current.id; cPage = ""; $("#cList").innerHTML = `<div class="status">Carico i commenti…</div>`; loadComments(true); }
@@ -2553,7 +2579,7 @@ async function openYtLink(y){
 }
 function commentHTML(c, replies){
   const s = c.snippet;
-  return `<div class="cmt"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
+  return `<div class="cmt" data-cid="${esc(c.id || "")}"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
     <div><b>${esc(s.authorDisplayName)}</b> <span class="sub">· ${ago(s.publishedAt)}${s.updatedAt !== s.publishedAt ? " (modificato)" : ""}</span>
       <p>${linkify(s.textOriginal ?? s.textDisplay, true)}</p>
       <div class="sub">${s.likeCount ? "♥ " + s.likeCount : ""}</div>
@@ -2561,7 +2587,7 @@ function commentHTML(c, replies){
 }
 
 async function loadComments(first){
-  const vid = current.id, list = $("#cList"), moreBtn = $("#cMore");
+  const vid = current.id, list = $("#cRest") || $("#cList"), moreBtn = $("#cMore");
   try {
     const j = await api("commentThreads", { part: "snippet,replies", videoId: vid, maxResults: 20, order: "relevance", textFormat: "plainText", ...(cPage ? { pageToken: cPage } : {}) });
     if (current?.id !== vid) return;
@@ -3106,9 +3132,14 @@ document.addEventListener("click", e => {
   if (t.dataset.mute) return muteTopic(t.dataset.mute);
   if (t.dataset.cm) return cardMenu(t.dataset.cm);
   if (t.dataset.nv) {
-    const v = CACHE.get(t.dataset.nv); if (!v) return toast("Video non disponibile");
-    closeSheet("#notifs"); openVideo(v.id);
-    return setTimeout(openComments, 350);
+    const { nv, nt, nc } = t.dataset;
+    (async () => {
+      if (!CACHE.get(nv)) { try { const d = await videoDetails([nv]); if (d.length) remember([toVideo(d[0])]); } catch {} }
+      if (!CACHE.get(nv)) return toast("Video non disponibile");
+      closeSheet("#notifs"); openVideo(nv);
+      setTimeout(() => nt ? openThread(nt, nc) : openComments(), 350);
+    })();
+    return;
   }
   if (t.dataset.unlater) { e.stopPropagation(); return toggleLater(S.later.find(v => v.id === t.dataset.unlater), false); }
   if (t.dataset.mypl) return openMyPlaylist(t.dataset.mypl);
@@ -3326,7 +3357,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261016065744";
+const BUILD = "20261018161329";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
