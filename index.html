@@ -474,6 +474,7 @@ const S = Object.assign({
   chMeta: {}, sCache: {}, relCache: {}, lastCost: null, nope: [], hidden: {}, homeSeen: {}, homePage: {}, chartTok: {}
 }, load());
 S.opt = Object.assign({}, DEF_OPT, S.opt || {});
+S.opt.cc = ""; S.opt.ccTr = "";                 // niente sottotitoli automatici: si scelgono video per video dal lettore
 /* Chiave e ID client già inseriti: così, reinstallando l'app sulla Home, non vanno incollati di nuovo.
    La chiave è visibile a chiunque apra il codice del sito: va limitata nella console Google a rxdaneel.github.io/* e alla sola YouTube Data API. */
 const DEFAULT_KEY = "AIzaSyBosG9sO5iElJzGat5-BkeLzqA1ZXj2FH4";
@@ -2004,19 +2005,19 @@ paintCtl();
 async function startPlayer(id, start){
   stopPlayer();
   $("#pFrame").innerHTML = `<div id="ytp"></div>`;
-  ccOn = !!S.opt.cc; paintCC();
+  ccOn = false; paintCC();
   const YT = await loadYTApi();
   if (current?.id !== id) return;
   ypId = id;
   yp = new YT.Player("ytp", {
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
-    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3, ...(start > 0 ? { start: Math.floor(start) } : {}),
-      ...(S.opt.cc ? { cc_load_policy: 1, cc_lang_pref: S.opt.cc } : {}) },
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: 1, iv_load_policy: 3, cc_load_policy: 0, ...(start > 0 ? { start: Math.floor(start) } : {}) },
     events: {
       onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) { ctlShow(true); savePos(); } else if (e.data === 1) ctlShow(); },
       onReady: e => {
         e.target.playVideo(); paintCtl();
-        if (S.opt.cc) setTimeout(() => applyCC(S.opt.cc, S.opt.ccTr), 1500);
+        // i video partono senza sottotitoli (si attivano dal pulsante CC del lettore, solo per quel video)
+        setTimeout(() => { try { if (yp === e.target) { e.target.setOption("captions", "track", {}); e.target.unloadModule("captions"); } } catch {} }, 1200);
         setTimeout(() => {                         // se iOS ha bloccato l'audio, parte muto con pulsante per attivarlo
           if (!yp || current?.id !== id) return;
           const st = e.target.getPlayerState();
@@ -3357,7 +3358,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261018161329";
+const BUILD = "20261025132215";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
