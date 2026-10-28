@@ -378,7 +378,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <header>
   <button id="qbar" data-act="qinfo" aria-label="Unità usate oggi"><i id="qfill"></i></button>
   <h1><button class="logo" id="logo" aria-label="YTG, vai alla Home"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M5 4.2v15.6L18.6 12z" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><rect x="24" y="10.2" width="12" height="3.6" rx="1.8" fill="currentColor"/></svg></button><span id="hTitle"></span></h1>
-  <form id="sForm" class="hsearch" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca" autocomplete="off" autocorrect="off" aria-label="Cerca su YouTube"><button type="button" id="sClear" aria-label="Cancella il testo" hidden><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg></button></form>
+  <form id="sForm" class="hsearch" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sIn" type="search" enterkeyhint="search" placeholder="Cerca" autocomplete="off" autocorrect="on" spellcheck="true" aria-label="Cerca su YouTube"><button type="button" id="sClear" aria-label="Cancella il testo" hidden><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg></button></form>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
   <button class="icon-btn" id="btnGear" aria-label="Impostazioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -1358,6 +1358,57 @@ function localSearch(q){
 }
 /* Ricerca come su YouTube: va subito su tutto YouTube (100 unità, costo fisso di Google).
    Gratis se la stessa ricerca è stata fatta nelle ultime 24 ore (anche dalla Home). Senza unità: solo tra i video già noti. */
+/* ---------- correzione degli errori di battitura ----------
+   Vocabolario = parole dei video che YTG conosce (titoli, tag, canali), delle tue ricerche e dei tuoi temi.
+   Una parola che non c'è viene sostituita con la più vicina (1 errore fino a 5 lettere, 2 da 6 in su, 3 da 10),
+   preferendo le parole più frequenti. Esempio: "videi zombiif" → "video zomboid". */
+let vocabC = null, vocabK = "";
+function searchVocab(){
+  const k = S.videos.length + ":" + CACHE.size + ":" + (S.sHist || []).length;
+  if (vocabC && vocabK === k) return vocabC;
+  const m = new Map(), add = (t, w = 1) => { for (const x of normTxt(t).split(/[^a-z0-9]+/)) if (x.length > 2 && !/^\d+$/.test(x)) m.set(x, (m.get(x) || 0) + w); };
+  for (const v of S.videos) { add(v.title); (v.tags || []).forEach(t => add(t, 2)); }
+  for (const v of CACHE.values()) add(v.title);
+  for (const c of S.channels) add(c.title, 3);
+  for (const q of S.sHist || []) add(q, 3);
+  for (const t of S.myTopics || []) add(t, 5);
+  for (const t of subTags().keys()) add(t, 3);
+  for (const w of "video guida tutorial gameplay recensione review come fare nuovo nuova migliore best build trailer ita italiano english live".split(" ")) add(w, 50);
+  vocabC = m; vocabK = k; return m;
+}
+function editDist(a, b, max){
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]; let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      let d = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d = Math.min(d, prev2[j - 2] + 1);   // lettere scambiate
+      cur[j] = d; if (d < best) best = d;
+    }
+    if (best > max) return max + 1;
+    prev2 = prev; prev = cur;
+  }
+  return prev[b.length];
+}
+function fixWord(w){
+  const n = normTxt(w);
+  if (n.length < 3 || /\d/.test(n) || STOPW.has(n)) return w;
+  const V = searchVocab(); if (V.has(n)) return w;
+  const max = n.length <= 5 ? 1 : n.length <= 9 ? 2 : 3;
+  let best = null, bd = max + 1, bc = 0;
+  for (const [x, c] of V) {
+    if (c < 2 || Math.abs(x.length - n.length) > max || x[0] !== n[0] && max < 2) continue;
+    const d = editDist(n, x, max);
+    if (d < bd || (d === bd && c > bc)) { best = x; bd = d; bc = c; }
+  }
+  return best && bd <= max ? best : w;
+}
+function correctQuery(q){
+  const out = q.split(/(\s+)/).map(p => /\s/.test(p) ? p : fixWord(p)).join("");
+  return normTxt(out) !== normTxt(q) ? out : null;
+}
+let sOrig = "";                       // quello che avevi scritto, se l'ho corretto
 /* ---------- ordine dei risultati ----------
    YouTube li restituisce per "pertinenza" (che premia i video popolari, spesso vecchi). Qui, gratis:
    1) quelli che non contengono abbastanza parole della ricerca vanno in fondo; 2) video in altre lingue tolti;
@@ -1403,14 +1454,16 @@ function searchToolbar(){
     <span style="width:1px;background:var(--line);margin:4px 2px;flex:none"></span>
     ${Object.entries(RANGES).map(([k, n]) => `<button class="chip chipq${sRange === k ? " on" : ""}" data-srange="${k}" style="padding:7px 13px">${n}</button>`).join("")}</div>`;
 }
-function doSearch(q){
+function doSearch(q, noFix){
   q = (q || "").trim(); if (!q) return;
   const y = ytTarget(q.match(URL_RE)?.[0] || "");            // un link di YouTube: apro direttamente il video o il canale
   if (y) { const i = $("#sIn"); if (i) i.value = ""; return openYtLink(y); }
+  if (!noFix) { const f = correctQuery(q); sOrig = f ? q : ""; if (f) { q = f; const i = $("#sIn"); if (i) i.value = f; } } else sOrig = "";
   if (q !== searchQ) { sRange = ""; sRangeYT = ""; }
   searchQ = q;
   addSearchHist(searchQ);
   searchErr = ""; searchYT = false;
+  vocabC = null;
   const hit = searchCached(searchQ, "") || searchCached(searchQ, "h:");
   if (hit) { searchRes = hit; searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
   searchLocal = localSearch(searchQ); searchRes = null;
@@ -1616,6 +1669,9 @@ function renderSearch(){
   // mentre scrivi (o se non hai ancora cercato niente) compaiono le ricerche recenti
   const hist = sFocus || (!searchQ && !searchBusy) ? histHTML(sFocus ? $("#sIn").value : "") : "";
   const paste = `<button class="more" data-act="pasteLink" style="display:flex;align-items:center;gap:10px;padding:12px 16px 4px"><svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Apri un link di YouTube copiato</button>`;
+  const typed = sFocus ? ($("#sIn").value || "").trim() : "", sug = typed.length > 2 ? correctQuery(typed) : null;
+  const sugRow = sug ? `<div class="hitem"><button class="hq" data-hq="${esc(sug)}" data-hqfix="1"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Forse cercavi: <b>${esc(sug)}</b></span></button></div>` : "";
+  if (sugRow && !searchBusy) { r.innerHTML = paste + sugRow + hist; return; }
   if (hist && !searchBusy) { r.innerHTML = paste + hist; return; }
   if (!searchQ && !searchBusy) { r.innerHTML = paste + `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).<br>Se incolli qui il link di un video, si apre direttamente.</p></div>`; return; }
   const ytBtn = `<div style="padding:12px 16px 16px">${quotaOut() ? `<div class="help" style="padding:0">Unità finite per oggi: cerco solo tra i video già noti.</div>` : `<button class="btn" data-act="searchYT">Riprova su YouTube</button>`}</div>`;
@@ -1635,7 +1691,8 @@ function renderSearch(){
       : more ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="searchMore" style="font-size:13px;padding:8px 14px">Altri risultati · 100 unità</button></div>` : "";
     const few = sRange && sRange !== sRangeYT && good.length < 8 && !quotaOut()
       ? `<div style="padding:10px 16px 14px"><button class="btn ghost" data-act="searchRange" style="font-size:13px;padding:8px 14px">Cerca su YouTube solo video dell'ultim${sRange === "w" ? "a settimana" : sRange === "m" ? "o mese" : "o anno"} · ${searchCached(searchQ, "p" + sRange + ":") ? "gratis" : "100 unità"}</button></div>` : "";
-    r.innerHTML = searchToolbar() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
+    const fixNote = sOrig ? `<div class="help" style="padding:10px 16px 0">Risultati per <b>${esc(searchQ)}</b> · <button class="more" data-act="searchOrig" style="padding:0">cerca invece “${esc(sOrig)}”</button></div>` : "";
+    r.innerHTML = fixNote + searchToolbar() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
       + (more ? tail : (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : ""));
   }
   else r.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
@@ -3230,6 +3287,7 @@ document.addEventListener("click", e => {
   if (a === "relSearch") searchRelated();
   if (a === "searchYT") return doSearchYT();
   if (a === "searchMore") return moreSearch(false);
+  if (a === "searchOrig") { const q = sOrig; $("#sIn").value = q; return doSearch(q, true); }
   if (a === "searchRange") { sRangeYT = sRange; return doSearchYT(); }
   if (a === "openComments") return openComments();
   if (/^c(Play|Back|Fwd|Mute|Rate|Full)$/.test(a)) return ctl(a);
@@ -3358,7 +3416,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261025132215";
+const BUILD = "20261028074348";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -3387,9 +3445,9 @@ function resetZoom(){
   setTimeout(() => { vpMeta.content = VP; window.scrollTo(0, window.scrollY); }, 60);
 }
 window.visualViewport?.addEventListener("resize", () => setTimeout(resetZoom, 250));
-document.addEventListener("focusout", () => setTimeout(() => { resetZoom(); window.scrollTo(0, 0); }, 150));
+document.addEventListener("focusout", () => setTimeout(() => { if (document.activeElement?.matches?.("input,textarea")) return; resetZoom(); window.scrollTo(0, 0); }, 150));
 const fixViewport = () => { if (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop) { window.scrollTo(0, 0); document.body.scrollTop = 0; } };
-addEventListener("scroll", fixViewport, { passive: true });
+addEventListener("scroll", () => { if (!document.activeElement?.matches?.("input,textarea")) fixViewport(); }, { passive: true });   // mentre scrivi non tocco niente: spostare il cursore con la barra spaziatrice resta fluido
 window.visualViewport?.addEventListener("scroll", () => { if (!document.activeElement?.matches?.("input,textarea")) fixViewport(); });
 addEventListener("pageshow", () => setTimeout(resetZoom, 300));
 setTimeout(resetZoom, 500);
