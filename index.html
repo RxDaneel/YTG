@@ -379,6 +379,36 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 #ptr.back{transition:transform .25s ease,opacity .25s ease}
 /* player di YouTube con i suoi comandi: la barra di YTG e lo strato per mostrarla sono nascosti */
 #pCtl,.reveal{display:none!important}
+
+/* ===== versione per computer (schermi larghi): menu a sinistra, video in griglia, pagine centrate ===== */
+@media (min-width:900px){
+  body{display:grid;grid-template-columns:220px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"head head" "nav main"}
+  header{grid-area:head;padding-left:20px;padding-right:16px}
+  main{grid-area:main}
+  nav{grid-area:nav;flex-direction:column;justify-content:flex-start;gap:2px;border-top:0;border-right:1px solid var(--line);padding:12px 10px}
+  nav button{flex:none;height:46px;flex-direction:row;justify-content:flex-start;gap:18px;padding:0 14px;border-radius:10px;font-size:14.5px}
+  nav button:hover{background:var(--surface)}
+  nav button[aria-current="true"]{background:var(--surface)}
+  .hsearch{max-width:620px;margin-left:auto;margin-right:auto}
+  header.searching h1,header.searching .icon-btn{display:revert}
+  header.searching #sCancel{display:none}
+  .view{max-width:none;padding:0 20px}
+  #vHome,#vSubs{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));column-gap:18px;align-content:start}
+  #vHome>:not(.cwrap):not(.card),#vSubs>:not(.cwrap):not(.card){grid-column:1/-1}
+  #sRes{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));column-gap:18px;align-content:start}
+  #sRes>:not(.card):not(.cwrap){grid-column:1/-1}
+  #vMe,#vSettings,#vChannels{max-width:900px;margin:0 auto}
+  .thumb{border-radius:12px}
+  .card .meta,.cwrap .meta{padding-left:0;padding-right:36px}
+  .cwrap .cdots{right:-6px}
+  .card:hover .title{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+  .row:hover,.hcard:hover{background:var(--surface);border-radius:10px}
+  #player>.pbar,#player>.pwrap,#player>.pinfo{max-width:1100px;margin-left:auto;margin-right:auto}
+  #player .pwrap{border-radius:12px;overflow:hidden}
+  #chan>*,#cmts>*,#notifs>*{max-width:900px;margin-left:auto;margin-right:auto}
+  .sheet{padding-top:8px}
+  #edge{display:none}
+}
 /* gesto "indietro": trascina dal bordo sinistro verso destra per chiudere la pagina aperta */
 #edge{position:fixed;left:0;top:0;bottom:0;width:16px;z-index:9999;touch-action:none}
 .sheet.dragging{box-shadow:-10px 0 30px rgba(0,0,0,.45)}
@@ -2276,9 +2306,10 @@ function pvCandidate(){
   }
   return null;
 }
+const HOVER = matchMedia("(hover: hover) and (pointer: fine)").matches;    // computer con il mouse
 function pvSchedule(){
   clearTimeout(PV.timer);
-  if (S.opt.inlinePrev === false) return;
+  if (S.opt.inlinePrev === false || HOVER) return;
   PV.timer = setTimeout(() => {
     if (document.hidden || document.querySelector(".sheet.open,.menu") || !S.key) return;
     if (PV.el && !PV.el.isConnected) stopPreview();             // la lista è stata ridisegnata
@@ -2287,6 +2318,25 @@ function pvSchedule(){
   }, 1200);
 }
 document.getElementById("main").addEventListener("scroll", pvSchedule, { passive: true });
+/* sul computer l'anteprima parte passando col mouse sopra la miniatura */
+if (HOVER) {
+  let hv = 0;
+  document.getElementById("main").addEventListener("mouseover", e => {
+    const card = e.target.closest(".card[data-v]"); clearTimeout(hv);
+    if (!card || S.opt.inlinePrev === false || card.dataset.v === PV.id) return;
+    hv = setTimeout(() => startPreview(card, card.dataset.v), 600);
+  });
+  document.getElementById("main").addEventListener("mouseout", e => {
+    const card = e.target.closest(".card[data-v]"); if (!card || card.contains(e.relatedTarget)) return;
+    clearTimeout(hv); if (PV.id === card.dataset.v) stopPreview();
+  });
+}
+/* tastiera sul computer: "/" per cercare, Esc per chiudere la pagina aperta */
+document.addEventListener("keydown", e => {
+  if (e.target.matches?.("input,textarea,select")) { if (e.key === "Escape") e.target.blur(); return; }
+  if (e.key === "/") { e.preventDefault(); $("#sIn").focus(); }
+  if (e.key === "Escape") { const open = [...document.querySelectorAll(".sheet.open")].sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0]; if (open) closeSheet("#" + open.id); }
+});
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopPreview(); else pvSchedule(); });
 /* apre un video anche se non è nella memoria dell'app (es. i tuoi video o i Mi piace dopo un riavvio) */
 async function openVideoAny(id, start){
@@ -3527,7 +3577,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028085519";
+const BUILD = "20261028222658";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
