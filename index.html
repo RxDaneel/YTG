@@ -662,7 +662,7 @@ async function syncSubs(){
     do {
       const j = await apiAuth("subscriptions", { part: "snippet", mine: "true", maxResults: 50, order: "alphabetical", ...(page ? { pageToken: page } : {}) });
       for (const s of j.items || []) subs.push({ id: s.snippet.resourceId.channelId, title: s.snippet.title,
-        thumb: s.snippet.thumbnails?.default?.url || "" });
+        thumb: s.snippet.thumbnails?.default?.url || "", sid: s.id });
       page = j.nextPageToken || "";
     } while (page);
     if (!subs.length && S.channels.length) {
@@ -2288,6 +2288,22 @@ function pvSchedule(){
 }
 document.getElementById("main").addEventListener("scroll", pvSchedule, { passive: true });
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopPreview(); else pvSchedule(); });
+/* apre un video anche se non è nella memoria dell'app (es. i tuoi video o i Mi piace dopo un riavvio) */
+async function openVideoAny(id, start){
+  if (!CACHE.get(id)) {
+    const lists = [S.meData?.uploads, S.meData?.liked, S.later, S.home, S.videos, S.marks?.map(m => m.v), Object.values(S.pos || {}).map(p => p.v)];
+    for (const l of lists) { const v = (l || []).find(x => x && x.id === id); if (v) { remember([v]); break; } }
+  }
+  if (!CACHE.get(id)) {
+    try {
+      let d = await videoDetails([id]);
+      if (!d.length && tokenOk()) d = await authVideos([id]);            // video privati o non in elenco: serve il tuo accesso
+      if (d.length) remember([toVideo(d[0])]);
+    } catch {}
+  }
+  if (!CACHE.get(id)) return toast("Video non disponibile");
+  openVideo(id, start);
+}
 function openVideo(id, start){
   const x = CACHE.get(id); if (!x) return;
   if (start == null && PV.id === id) start = pvTime();          // dall'anteprima: riprende dallo stesso punto
@@ -3006,6 +3022,9 @@ function renderMe(){
   const laterRow = `<button class="row" data-act="meLater"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
       <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></div>
       <div style="min-width:0"><div class="title">Guarda più tardi</div><div class="sub">${S.later.length} video · salvati in YTG</div></div></button>`;
+  const subsRow = S.channels.length ? `<button class="row" data-act="meSubs"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
+      <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6.5 6.5 0 0 1 3 6"/></svg></div>
+      <div style="min-width:0"><div class="title">Gestisci iscrizioni</div><div class="sub">${S.channels.length} canali · disiscriviti anche da più insieme</div></div></button>` : "";
   const marksRow = `<button class="row" data-act="meMarks"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
       <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></svg></div>
       <div style="min-width:0"><div class="title">Segnalibri</div><div class="sub">${S.marks.length} momenti salvati</div></div></button>`;
@@ -3020,6 +3039,7 @@ function renderMe(){
     ${statsHTML()}
 
     <div class="shead"><h3>Playlist</h3><span class="sub">${d ? d.playlists.length + 3 : 2}</span></div>
+    ${subsRow}
     ${laterRow}
     ${marksRow}
     ${d ? `<button class="row" data-act="meLiked"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
@@ -3038,6 +3058,7 @@ async function openMyPlaylist(id){
   const d = S.meData; ME.plShow = 60; ME.laterShow = 60;
   if (id === "later") { ME.pl = { id, title: "Guarda più tardi", items: null }; renderMe(); return toTop(); }
   if (id === "marks") { ME.pl = { id, title: "Segnalibri", items: null }; renderMe(); return toTop(); }
+  if (id === "subs") { ME.pl = { id, title: "Iscrizioni", items: null }; SM.sel = new Set(); SM.q = ""; renderMe(); return toTop(); }
   if (id === "liked") { ME.pl = { id, title: "Video piaciuti", items: d.liked }; return renderMe(); }
   const p = d.playlists.find(x => x.id === id);
   ME.pl = { id, title: p?.title || "Playlist", items: null }; renderMe(); toTop();
@@ -3097,8 +3118,71 @@ async function importLater(text){
   } catch (e) { ME.laterMsg = "Errore: " + errMsg(e); }
   renderMe();
 }
+/* ---------- gestione iscrizioni: scegli più canali e disiscriviti in un colpo (50 unità per canale, costo fisso di Google) ---------- */
+const SM = { sel: new Set(), q: "", sort: "az", busy: false };
+function lastUpload(){ const m = {}; for (const v of S.videos) if (!m[v.ch] || v.at > m[v.ch]) m[v.ch] = v.at; return m; }
+function renderSubsManager(){
+  const v = $("#vMe"), last = lastUpload(), q = normTxt(SM.q);
+  const list = S.channels.filter(c => !q || normTxt(c.title).includes(q)).sort((a, b) => SM.sort === "old"
+    ? (last[a.id] || "").localeCompare(last[b.id] || "") : a.title.localeCompare(b.title, "it"));
+  const n = SM.sel.size;
+  v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
+      <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Iscrizioni</h2>
+      <div class="sub">${S.channels.length} canali. Tocca i canali da togliere, poi “Disiscriviti”.</div>
+      <input class="tin" id="smQ" placeholder="Cerca tra i tuoi canali" value="${esc(SM.q)}" autocomplete="off"></div>
+    <div class="chips" style="padding-top:4px">
+      <button class="chip chipq${SM.sort === "az" ? " on" : ""}" data-smsort="az" style="padding:7px 13px">A–Z</button>
+      <button class="chip chipq${SM.sort === "old" ? " on" : ""}" data-smsort="old" style="padding:7px 13px">Fermi da più tempo</button>
+      <button class="chip chipq" data-act="smAll" style="padding:7px 13px">${list.length && list.every(c => SM.sel.has(c.id)) ? "Deseleziona" : "Seleziona"} tutti</button></div>
+    <div id="smList">${list.map(c => `<label class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="">
+      <span>${esc(c.title)}<small style="display:block;color:var(--muted);font-size:12px">${last[c.id] ? "ultimo video " + ago(last[c.id]) : "nessun video recente"}</small></span>
+      <input type="checkbox" data-smch="${c.id}" ${SM.sel.has(c.id) ? "checked" : ""}></label>`).join("") || `<div class="status" style="padding:12px 16px">Nessun canale.</div>`}</div>
+    <div class="grpbar"><span class="sub" style="margin-right:auto;align-self:center">${n ? `${n} scelt${n === 1 ? "o" : "i"} · ${n * 50} unità` : "Nessuno scelto"}</span>
+      <button class="btn" data-act="smGo" ${!n || SM.busy ? "disabled" : ""} style="background:var(--danger);color:#fff">${SM.busy ? "Attendi…" : "Disiscriviti"}</button></div>`;
+  const qi = $("#smQ"); qi.oninput = () => { SM.q = qi.value; const k = normTxt(SM.q); v.querySelectorAll("#smList .grow").forEach(r => r.hidden = k && !normTxt(r.dataset.gname).includes(k)); };
+}
+async function unsubscribeMany(){
+  const ids = [...SM.sel]; if (!ids.length || SM.busy) return;
+  if (!tokenOk()) { toast("Accedi di nuovo, poi riprova"); return reauth({ do: "me" }); }
+  const names = ids.map(id => S.channels.find(c => c.id === id)?.title || id);
+  if (!confirm(`Annullare l'iscrizione a ${ids.length} canal${ids.length === 1 ? "e" : "i"}?\n\n${names.slice(0, 12).join("\n")}${names.length > 12 ? "\n…e altri " + (names.length - 12) : ""}\n\nCosta ${ids.length * 50} unità.`)) return;
+  if (ids.length * 50 + usedToday() > 10000) return toast(`Servono ${ids.length * 50} unità e oggi non bastano: scegline meno`);
+  SM.busy = true; renderSubsManager();
+  try {
+    // id delle iscrizioni (servono a YouTube per toglierle): se mancano rileggo l'elenco, 1 unità ogni 50 canali
+    if (ids.some(id => !S.channels.find(c => c.id === id)?.sid)) {
+      let page = "";
+      do {
+        const j = await apiAuth("subscriptions", { part: "snippet", mine: "true", maxResults: 50, ...(page ? { pageToken: page } : {}) });
+        for (const it of j.items || []) { const c = S.channels.find(x => x.id === it.snippet.resourceId.channelId); if (c) c.sid = it.id; }
+        page = j.nextPageToken || "";
+      } while (page);
+    }
+    const done = [], failed = [];
+    for (const [i, id] of ids.entries()) {
+      toast(`Disiscrizione ${i + 1} di ${ids.length}…`);
+      const sid = S.channels.find(c => c.id === id)?.sid;
+      try {
+        if (sid) {
+          spend("subscriptions", "DELETE");
+          const r = await fetch(API + "subscriptions?id=" + encodeURIComponent(sid), { method: "DELETE", headers: { Authorization: "Bearer " + S.token } });
+          if (r.status === 401) { const e = new Error("Sessione scaduta"); e.relogin = true; throw e; }
+          if (!r.ok && r.status !== 404) throw new Error("Errore " + r.status);
+        }
+        done.push(id);
+      } catch (e) { if (e.relogin) throw e; failed.push(id); }
+    }
+    const gone = new Set(done);
+    S.channels = S.channels.filter(c => !gone.has(c.id)); S.videos = S.videos.filter(v => !gone.has(v.ch));
+    (S.groups || []).forEach(g => g.ids = g.ids.filter(id => !gone.has(id)));
+    SM.sel = new Set(failed); save(); updateBell();
+    toast(failed.length ? `Fatto per ${done.length}, non riuscito per ${failed.length}` : `Iscrizione annullata a ${done.length} canal${done.length === 1 ? "e" : "i"}`);
+  } catch (e) { toast(e.relogin ? "Sessione scaduta: accedi di nuovo e riprova" : "Operazione non riuscita: " + errMsg(e)); }
+  finally { SM.busy = false; renderSubsManager(); }
+}
 function renderMyPlaylist(){
   const v = $("#vMe"), pl = ME.pl;
+  if (pl.id === "subs") return renderSubsManager();
   if (pl.id === "marks") {
     v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
         <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Segnalibri</h2>
@@ -3133,6 +3217,8 @@ function renderMyPlaylist(){
 
 document.addEventListener("input", e => { if (e.target.id === "chQ") chanFilter(); });
 document.addEventListener("change", e => {
+  if (e.target.dataset?.smch) { e.target.checked ? SM.sel.add(e.target.dataset.smch) : SM.sel.delete(e.target.dataset.smch); const n = SM.sel.size;
+    const bar = document.querySelector("#vMe .grpbar"); if (bar) { bar.querySelector(".sub").textContent = n ? `${n} scelt${n === 1 ? "o" : "i"} · ${n * 50} unità` : "Nessuno scelto"; bar.querySelector("button").disabled = !n; } return; }
   if (e.target.dataset?.gch && GE) { e.target.checked ? GE.ids.add(e.target.dataset.gch) : GE.ids.delete(e.target.dataset.gch); const c = $("#grpCount"); if (c) c.textContent = GE.ids.size + " canali scelti"; return; }
   if (e.target.id === "bkFile" && e.target.files?.[0]) { const r = new FileReader(); r.onload = () => importBackup(r.result); r.readAsText(e.target.files[0]); e.target.value = ""; return; }
   if (e.target.id !== "laterFile" || !e.target.files?.[0]) return;
@@ -3181,6 +3267,8 @@ async function addChannels(ids, label){
 
 let resetArmed = false;
 document.addEventListener("click", e => {
+  const smS = e.target.closest("[data-smsort]");
+  if (smS) { SM.sort = smS.dataset.smsort; return renderSubsManager(); }
   const mk = e.target.closest("[data-mark]");
   if (mk) return openMark(mk.dataset.mark);
   const um = e.target.closest("[data-unmark]");
@@ -3227,7 +3315,7 @@ document.addEventListener("click", e => {
   if (t.dataset.pl) return openPlaylist(t.dataset.pl, t.dataset.plt);
   if (t.dataset.tab) return go(t.dataset.tab);
   if (t.dataset.go) { closeSheets(); return go(t.dataset.go); }
-  if (t.dataset.v) return openVideo(t.dataset.v);
+  if (t.dataset.v) return openVideoAny(t.dataset.v);
   if (t.dataset.replies) return loadReplies(t.dataset.replies);
   if (t.dataset.q) { go("vSearch"); $("#sIn").value = t.dataset.q; return doSearch(t.dataset.q); }
   if (t.dataset.del) {
@@ -3273,6 +3361,9 @@ document.addEventListener("click", e => {
   if (a === "mark") return addMark();
   if (a === "chSearchAll") return chanSearchAll();
   if (a === "meMarks") return openMyPlaylist("marks");
+  if (a === "meSubs") return openMyPlaylist("subs");
+  if (a === "smGo") return unsubscribeMany();
+  if (a === "smAll") { const k = normTxt(SM.q), vis = S.channels.filter(c => !k || normTxt(c.title).includes(k)); const all = vis.every(c => SM.sel.has(c.id)); vis.forEach(c => all ? SM.sel.delete(c.id) : SM.sel.add(c.id)); return renderSubsManager(); }
   if (a === "pasteLink") {
     if (!navigator.clipboard?.readText) return toast("Incolla il link nella barra di ricerca");
     navigator.clipboard.readText().then(txt => {
@@ -3436,7 +3527,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028074950";
+const BUILD = "20261028085009";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
