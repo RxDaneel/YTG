@@ -1775,25 +1775,22 @@ const REGIONS = { IT: "Italia", US: "Stati Uniti", GB: "Regno Unito", DE: "Germa
 const regionName = c => REGIONS[c] || c;
 
 const THEMES = {
-  auto: { name: "Automatico", bg: "#f3f1ea", su: "#1a1a19", ac: "#9c9a92" },
-  grafite: { name: "Grafite", bg: "#1a1a19", su: "#2e2e2b", ac: "#d9d7d1" },
-  carta: { name: "Carta", bg: "#f3f1ea", su: "#dfdbcf", ac: "#3b3b38" },
-  oled: { name: "Nero OLED", bg: "#000000", su: "#1a1a1a", ac: "#e6e6e6" },
-  neon: { name: "Neon", bg: "#12062a", su: "#2b1260", ac: "#ff2bd6" },
-  term: { name: "Terminale", bg: "#020a03", su: "#0b2210", ac: "#41ff74" }
+  oled: { name: "Nero", bg: "#000000", su: "#1a1a1a", ac: "#e6e6e6" },
+  carta: { name: "Bianco", bg: "#f3f1ea", su: "#dfdbcf", ac: "#3b3b38" }
 };
 function applyTheme(t){
-  t = THEMES[t] ? t : "auto";
-  if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  try { t === "auto" ? localStorage.removeItem("ytg.theme") : localStorage.setItem("ytg.theme", t); } catch {}
+  // solo Nero e Bianco: chi aveva un altro tema passa a quello più vicino al telefono (scuro → Nero, chiaro → Bianco)
+  if (!THEMES[t]) { t = matchMedia("(prefers-color-scheme: dark)").matches ? "oled" : "carta"; if (S.opt.theme !== t) { S.opt.theme = t; save(); } }
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("ytg.theme", t); } catch {}
   const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg || "#1a1a19");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg || "#000000");
 }
 applyTheme(S.opt.theme);
 function themePicker(){
-  const cur = S.opt.theme || "auto";
+  const cur = S.opt.theme;
   return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${k}" aria-pressed="${k === cur}">
-    <span class="sw" style="background:${k === "auto" ? `linear-gradient(135deg,${t.bg} 50%,${t.su} 50%)` : t.bg}"><i style="background:${k === "auto" ? "transparent" : t.ac}"></i></span>${t.name}</button>`).join("")}</div></div>`;
+    <span class="sw" style="background:${t.bg}"><i style="background:${t.ac}"></i></span>${t.name}</button>`).join("")}</div></div>`;
 }
 /* ---------- backup ----------
    Tutto quello che sta solo su questo telefono. Restano fuori l'accesso a Google (si rifà) e le cache che si riscaricano. */
@@ -3577,7 +3574,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028222658";
+const BUILD = "20261028224750";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
