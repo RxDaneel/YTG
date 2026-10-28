@@ -3128,15 +3128,15 @@ function renderSubsManager(){
   const n = SM.sel.size;
   v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
       <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Iscrizioni</h2>
-      <div class="sub">${S.channels.length} canali. Tocca i canali da togliere, poi “Disiscriviti”.</div>
+      <div class="sub">${S.channels.length} canali. Tocca il nome per aprire il canale; spunta a destra quelli da togliere, poi “Disiscriviti”.</div>
       <input class="tin" id="smQ" placeholder="Cerca tra i tuoi canali" value="${esc(SM.q)}" autocomplete="off"></div>
     <div class="chips" style="padding-top:4px">
       <button class="chip chipq${SM.sort === "az" ? " on" : ""}" data-smsort="az" style="padding:7px 13px">A–Z</button>
       <button class="chip chipq${SM.sort === "old" ? " on" : ""}" data-smsort="old" style="padding:7px 13px">Fermi da più tempo</button>
       <button class="chip chipq" data-act="smAll" style="padding:7px 13px">${list.length && list.every(c => SM.sel.has(c.id)) ? "Deseleziona" : "Seleziona"} tutti</button></div>
-    <div id="smList">${list.map(c => `<label class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="">
-      <span>${esc(c.title)}<small style="display:block;color:var(--muted);font-size:12px">${last[c.id] ? "ultimo video " + ago(last[c.id]) : "nessun video recente"}</small></span>
-      <input type="checkbox" data-smch="${c.id}" ${SM.sel.has(c.id) ? "checked" : ""}></label>`).join("") || `<div class="status" style="padding:12px 16px">Nessun canale.</div>`}</div>
+    <div id="smList">${list.map(c => `<div class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="" data-ch="${c.id}">
+      <span data-ch="${c.id}" style="cursor:pointer">${esc(c.title)} <b style="color:var(--muted);font-weight:500">›</b><small style="display:block;color:var(--muted);font-size:12px">${last[c.id] ? "ultimo video " + ago(last[c.id]) : "nessun video recente"}</small></span>
+      <label style="display:grid;place-items:center;width:48px;height:48px;margin:-8px -12px -8px 0"><input type="checkbox" data-smch="${c.id}" ${SM.sel.has(c.id) ? "checked" : ""} aria-label="Scegli ${esc(c.title)}"></label></div>`).join("") || `<div class="status" style="padding:12px 16px">Nessun canale.</div>`}</div>
     <div class="grpbar"><span class="sub" style="margin-right:auto;align-self:center">${n ? `${n} scelt${n === 1 ? "o" : "i"} · ${n * 50} unità` : "Nessuno scelto"}</span>
       <button class="btn" data-act="smGo" ${!n || SM.busy ? "disabled" : ""} style="background:var(--danger);color:#fff">${SM.busy ? "Attendi…" : "Disiscriviti"}</button></div>`;
   const qi = $("#smQ"); qi.oninput = () => { SM.q = qi.value; const k = normTxt(SM.q); v.querySelectorAll("#smList .grow").forEach(r => r.hidden = k && !normTxt(r.dataset.gname).includes(k)); };
@@ -3527,7 +3527,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028085009";
+const BUILD = "20261028085519";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
