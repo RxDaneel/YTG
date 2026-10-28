@@ -2402,7 +2402,20 @@ function renderWatch(){
     <div style="padding:4px 0 12px"><button class="btn ghost" id="relMore" data-act="relSearch" style="font-size:13px;padding:8px 14px">Cerca altri video simili · 100 unità</button></div>`;
   renderRelated(); loadRelated(x);
   paintRating();
-  loadChapters(x.id); paintMarks();
+  loadChapters(x.id); paintMarks(); loadCommentPreview(x.id);
+}
+/* anteprima: il primo commento (il più apprezzato) sotto il video, 1 unità; ricordato per la sessione */
+const cPrevCache = new Map();
+async function loadCommentPreview(id){
+  const paint = top => { if (current?.id !== id) return; const el = $("#cPrev"); if (!el) return;
+    el.innerHTML = top ? `<img src="${esc(top.authorProfileImageUrl)}" alt=""><div>${esc(top.textOriginal ?? top.textDisplay)}</div>` : `<div class="sub">${top === null ? "Ancora nessun commento. Scrivi il primo." : "Commenti disattivati."}</div>`; };
+  if (cPrevCache.has(id)) return paint(cPrevCache.get(id));
+  if (!S.key || quotaOut()) return;
+  try {
+    const j = await api("commentThreads", { part: "snippet", videoId: id, maxResults: 1, order: "relevance", textFormat: "plainText" });
+    const top = j.items?.[0]?.snippet?.topLevelComment?.snippet || null;
+    cPrevCache.set(id, top); paint(top);
+  } catch (e) { if (e.reason === "commentsDisabled") { cPrevCache.set(id, false); paint(false); } }
 }
 /* ---------- segnalibri: momenti salvati dentro i video, con una nota ---------- */
 const markKey = m => m.id + ":" + m.t + ":" + m.at;
@@ -3574,7 +3587,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028224750";
+const BUILD = "20261028225419";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
