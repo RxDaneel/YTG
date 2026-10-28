@@ -86,7 +86,13 @@ header h1{font:700 22px/1.2 var(--serif);margin:0;flex:none;min-width:0;white-sp
 .hsearch svg{width:17px;height:17px;flex:none;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round}
 .hsearch input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--fg);font:16px var(--font);padding:0;height:100%}
 .hsearch input::placeholder{color:var(--muted)}
-.hsearch input{-webkit-appearance:none;appearance:none;border-radius:0;text-overflow:clip;white-space:nowrap}
+.hsearch textarea{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--fg);font:16px/20px var(--font);padding:0;margin:0;
+  height:20px;resize:none;overflow:hidden;-webkit-appearance:none;appearance:none;border-radius:0}
+.hsearch textarea::placeholder{color:var(--muted)}
+/* mentre scrivi il testo va a capo (fino a 3 righe): tutta la frase è visibile e il cursore si sposta senza dover far scorrere il testo */
+header.searching .hsearch{height:auto;min-height:38px;padding-top:9px;padding-bottom:9px;border-radius:19px;align-items:flex-start}
+header.searching .hsearch svg{margin-top:2px}
+header.searching #sClear{margin-top:-2px}
 /* mentre scrivi la barra occupa tutta la larghezza, come nell'app di YouTube */
 header.searching h1,header.searching .icon-btn{display:none}
 header.searching .hsearch{margin:0 4px 0 0}
@@ -384,7 +390,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 <header>
   <button id="qbar" data-act="qinfo" aria-label="Unità usate oggi"><i id="qfill"></i></button>
   <h1><button class="logo" id="logo" aria-label="YTG, vai alla Home"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M5 4.2v15.6L18.6 12z" fill="currentColor" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round"/><rect x="24" y="10.2" width="12" height="3.6" rx="1.8" fill="currentColor"/></svg></button><span id="hTitle"></span></h1>
-  <form id="sForm" class="hsearch" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="sIn" type="text" inputmode="search" enterkeyhint="search" placeholder="Cerca" autocomplete="off" autocorrect="on" spellcheck="true" aria-label="Cerca su YouTube"><button type="button" id="sClear" aria-label="Cancella il testo" hidden><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg></button></form>
+  <form id="sForm" class="hsearch" role="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><textarea id="sIn" rows="1" inputmode="search" enterkeyhint="search" placeholder="Cerca" autocomplete="off" autocorrect="on" spellcheck="true" aria-label="Cerca su YouTube"></textarea><button type="button" id="sClear" aria-label="Cancella il testo" hidden><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg></button></form>
   <button type="button" id="sCancel">Annulla</button>
   <button class="icon-btn" id="btnBell" aria-label="Notifiche"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge" id="bellBadge" hidden></span></button>
   <button class="icon-btn" id="btnRefresh" aria-label="Aggiorna"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
@@ -1647,17 +1653,22 @@ let sFocus = false;
   const hdr = document.querySelector("header");
   document.getElementById("sCancel").addEventListener("click", () => { inp.blur(); hdr.classList.remove("searching"); });
   inp.addEventListener("focus", () => {
-    sFocus = true; hdr.classList.add("searching");
+    sFocus = true; hdr.classList.add("searching"); setTimeout(grow, 0);
     if (tab !== "vSearch") { go("vSearch"); inp.value = searchQ; if (searchQ) setTimeout(() => inp.select?.(), 0); }
     renderSearch();
   });
   const clr = document.getElementById("sClear"), syncClr = () => clr.hidden = !inp.value;
-  inp.addEventListener("input", () => { syncClr(); if (sFocus && tab === "vSearch") renderSearch(); });
+  const grow = () => { inp.style.height = "20px"; if (hdr.classList.contains("searching")) inp.style.height = Math.min(inp.scrollHeight, 60) + "px"; inp.style.overflowY = inp.scrollHeight > 60 ? "auto" : "hidden"; };
+  inp.addEventListener("input", () => {
+    if (/\n/.test(inp.value)) inp.value = inp.value.replace(/\s*\n\s*/g, " ");   // niente a capo (es. testo incollato)
+    grow(); syncClr(); if (sFocus && tab === "vSearch") renderSearch();
+  });
+  inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); document.getElementById("sForm").requestSubmit(); } });
   // la × svuota la barra e lascia la tastiera aperta per scrivere subito
   clr.addEventListener("pointerdown", e => e.preventDefault());
   clr.addEventListener("click", () => { inp.value = ""; syncClr(); inp.focus(); sFocus = true; if (tab === "vSearch") renderSearch(); else go("vSearch"); });
   setInterval(syncClr, 500);                                 // anche quando il testo cambia da codice
-  inp.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== inp) { sFocus = false; hdr.classList.remove("searching"); if (tab === "vSearch") renderSearch(); } }, 250));
+  inp.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== inp) { sFocus = false; hdr.classList.remove("searching"); grow(); inp.scrollTop = 0; if (tab === "vSearch") renderSearch(); } }, 250));
 })();
 function addSearchHist(q){
   S.sHist = [q].concat((S.sHist || []).filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30); save();
@@ -3425,7 +3436,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028074722";
+const BUILD = "20261028074950";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
