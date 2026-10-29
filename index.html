@@ -868,9 +868,47 @@ const usedToday = () => S.qDay === qDay() ? S.qUsed || 0 : 0;
       più un piccolo controllo a rotazione di 4 canali, nel caso il contatore di YouTube sia in ritardo;
    3) si chiedono i dettagli solo dei video mai visti (1 unità ogni 50 video).
    Il primo aggiornamento scarica tutti i canali una volta sola. */
+/* ---------- iscrizioni allineate a YouTube ----------
+   Rilegge l'elenco delle tue iscrizioni (1 unità ogni 50 canali): toglie i canali da cui ti sei disiscritto
+   (anche dall'app di YouTube), aggiunge i nuovi. In automatico al massimo ogni 3 ore; trascinando in basso ogni 5 minuti. */
+let subSyncBusy = false;
+async function syncSubsLight(manual){
+  if (!tokenOk() || subSyncBusy) return;
+  subSyncBusy = true;
+  try {
+    const subs = []; let page = "";
+    do {
+      const j = await apiAuth("subscriptions", { part: "snippet", mine: "true", maxResults: 50, order: "alphabetical", ...(page ? { pageToken: page } : {}) });
+      for (const it of j.items || []) subs.push({ id: it.snippet.resourceId.channelId, title: it.snippet.title, thumb: it.snippet.thumbnails?.default?.url || "", sid: it.id });
+      page = j.nextPageToken || "";
+    } while (page);
+    const auto = S.channels.filter(c => !c.manual);
+    if (!subs.length && auto.length) return;                                       // account sbagliato o senza canale: non tocco niente
+    if (auto.length > 20 && subs.length < auto.length / 2) { toast(`YouTube dice che hai ${subs.length} iscrizioni (qui ${auto.length}): se è giusto, tocca Sincronizza nelle impostazioni`); return; }
+    const now = new Set(subs.map(x => x.id)), had = new Set(S.channels.map(c => c.id)), old = new Map(S.channels.map(c => [c.id, c]));
+    const removed = auto.filter(c => !now.has(c.id)).map(c => c.id), added = subs.filter(x => !had.has(x.id));
+    S.channels = subs.map(x => ({ ...(old.get(x.id) || {}), ...x })).concat(S.channels.filter(c => c.manual && !now.has(c.id)));
+    if (removed.length) {
+      const gone = new Set(removed);
+      S.videos = S.videos.filter(v => !gone.has(v.ch)); S.home = S.home.filter(v => !gone.has(v.ch));
+      (S.groups || []).forEach(g => g.ids = g.ids.filter(id => !gone.has(id)));
+    }
+    if (added.length) S.lastFetch = 0;
+    S.subSyncAt = Date.now(); S.lastSync = Date.now(); save();
+    if (removed.length || added.length) {
+      rerender(); updateBell();
+      toast([removed.length ? `${removed.length} iscrizion${removed.length === 1 ? "e tolta" : "i tolte"}` : "", added.length ? `${added.length} nuov${added.length === 1 ? "a" : "e"}` : ""].filter(Boolean).join(" · ") + " (allineato a YouTube)");
+    }
+  } catch {} finally { subSyncBusy = false; }
+}
+const subSyncDue = manual => Date.now() - (S.subSyncAt || 0) > (manual ? 5 * 60000 : 3 * 3600000);
 async function refresh(manual, full){
   if (busy) return;
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
+  if (S.me && subSyncDue(manual)) {
+    if (tokenOk()) await syncSubsLight(manual);
+    else if (manual && Date.now() - (S.subSyncAt || 0) > 3600000) return reauth({ do: "subsync", tab });   // accesso scaduto: lo rinnovo (di solito senza chiedere niente)
+  }
   if (!S.channels.length) { if (manual) toast("Nessun canale: accedi o aggiungili dalla scheda Canali"); return; }
   busy = true; spin(true);
   const u0 = usedToday(), now = Date.now(), meta = S.chMeta;
@@ -3587,7 +3625,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261028225419";
+const BUILD = "20261029131328";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -3633,6 +3671,8 @@ if (after?.do === "comment") {
   let v = null; try { v = JSON.parse(sessionStorage.getItem("ytg.video")); } catch {}
   go(after.tab || "vSubs");
   if (v) { CACHE.set(v.id, v); openVideo(v.id); postComment(v, after.text); }
+} else if (after?.do === "subsync") {
+  go(after.tab || (S.opt.showHome ? "vHome" : "vSubs")); syncSubsLight(true).then(() => refresh());
 } else if (after?.do === "me") {
   go("vMe"); loadMe();
 } else if (after?.do === "sub" || after?.do === "rate") {
@@ -3651,6 +3691,11 @@ if (after?.do === "comment") {
   else { go(after.tab || (S.opt.showHome ? "vHome" : "vSubs")); setTimeout(() => toast("Accesso rinnovato"), 300); }
 }
 else go(S.opt.showHome ? "vHome" : "vSubs");
+// iscrizioni allineate a YouTube: subito se l'accesso è valido, altrimenti una volta al giorno lo rinnovo in silenzio
+if (!after && S.me && subSyncDue(false)) {
+  if (tokenOk()) setTimeout(() => syncSubsLight(false), 1200);
+  else if (Date.now() - (S.subSyncAt || 0) > 24 * 3600000 && (!S.silentFail || Date.now() - S.silentFail > 6 * 3600000)) setTimeout(() => reauth({ do: "subsync", tab }), 800);
+} else if (after && after.do !== "subsync" && tokenOk() && subSyncDue(false)) setTimeout(() => syncSubsLight(false), 1500);
 updateBell(); paintQuota(); setInterval(paintQuota, 60000); setTimeout(() => loadNotifs(), 2500);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
