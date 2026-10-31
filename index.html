@@ -714,7 +714,8 @@ async function syncSubs(){
     if (S.channels.length > 20 && subs.length < S.channels.length / 2) toast(`Attenzione: questo account ha ${subs.length} iscrizioni (prima erano ${S.channels.length}). Se non è giusto, usa “Cambia account”.`);
     const manual = S.channels.filter(c => c.manual && !subs.some(s => s.id === c.id));
     S.channels = subs.concat(manual);
-    S.myChId = c?.id || ""; S.meData = null; S.chMeta = S.chMeta || {};
+    if (c?.id && S.myChId && c.id !== S.myChId) S.meData = null;     // solo se hai cambiato account
+    S.myChId = c?.id || ""; S.chMeta = S.chMeta || {};
     S.videos = S.videos.filter(v => S.channels.some(c => c.id === v.ch));
     try {
       const lk = await apiAuth("videos", { part: "snippet", myRating: "like", maxResults: 50 });
@@ -1740,7 +1741,8 @@ let sFocus = false;
   const grow = () => { inp.style.height = "20px"; if (hdr.classList.contains("searching")) inp.style.height = Math.min(inp.scrollHeight, 60) + "px"; inp.style.overflowY = inp.scrollHeight > 60 ? "auto" : "hidden"; };
   inp.addEventListener("input", () => {
     if (/\n/.test(inp.value)) inp.value = inp.value.replace(/\s*\n\s*/g, " ");   // niente a capo (es. testo incollato)
-    grow(); syncClr(); if (sFocus && tab === "vSearch") renderSearch();
+    grow(); syncClr();
+    clearTimeout(inp._t); inp._t = setTimeout(() => { if (sFocus && tab === "vSearch") renderSearch(); }, 120);
   });
   inp.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); document.getElementById("sForm").requestSubmit(); } });
   // la × svuota la barra e lascia la tastiera aperta per scrivere subito
@@ -1764,7 +1766,9 @@ function histHTML(filter){
 function renderSearch(){
   const v = $("#vSearch");
   if (!v.querySelector("#sRes")) v.innerHTML = `<div id="sRes"></div>`;
-  const r = $("#sRes");
+  const real = $("#sRes");
+  // ridisegno solo se il contenuto è cambiato: scrivendo, le miniature non lampeggiano più
+  const r = { set innerHTML(h){ if (real._h !== h) { real._h = h; real.innerHTML = h; } } };
   // mentre scrivi (o se non hai ancora cercato niente) compaiono le ricerche recenti
   const hist = sFocus || (!searchQ && !searchBusy) ? histHTML(sFocus ? $("#sIn").value : "") : "";
   const paste = `<button class="more" data-act="pasteLink" style="display:flex;align-items:center;gap:10px;padding:12px 16px 4px"><svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Apri un link di YouTube copiato</button>`;
@@ -3101,7 +3105,7 @@ async function loadMe(manual){
     S.likedIds = [...new Set(S.meData.liked.map(v => v.id).concat(S.likedIds || []))].slice(0, 5000); save();
     if (manual) toast(liked.err ? "Mi piace non letti: " + errMsg(liked.err) : `Profilo aggiornato · ${S.meData.liked.length} video piaciuti` + (S.meData.likedShorts ? ` (${S.meData.likedShorts} Shorts esclusi)` : ""));
   } catch (e) {
-    ME.err = e.relogin ? "Accedi di nuovo per vedere il tuo profilo." : errMsg(e);
+    ME.err = e.relogin ? (S.me ? "" : "Accedi di nuovo per vedere il tuo profilo.") : errMsg(e);
   } finally { ME.busy = false; spin(false); renderMe(); }
 }
 
@@ -3140,7 +3144,8 @@ function renderMe(){
   v.innerHTML = head + `
     ${ME.err ? `<div class="status err" style="padding:0 16px">${esc(ME.err)}</div>` : ""}
     ${ME.busy && !d ? `<div class="status" style="padding:8px 16px">Carico il tuo profilo…</div>` : ""}
-    ${(!d && !ME.busy && !tokenOk()) || ME.err.startsWith("Accedi") ? loginCard : ""}
+    ${!S.me && ((!d && !ME.busy && !tokenOk()) || ME.err.startsWith("Accedi")) ? loginCard : ""}
+    ${S.me && !d && !ME.busy && !tokenOk() ? `<button class="more" data-act="meLogin" style="display:block;padding:2px 16px 8px;color:var(--muted);font-weight:500;font-size:13px;text-align:left">Playlist, Mi piace e i tuoi video: tocca per caricarli ›</button>` : ""}
 
     ${hist.length ? `<div class="shead"><h3>Cronologia</h3><span class="sub">video aperti in YTG</span></div>
       <div class="hrow">${hist.map(hcard).join("")}</div>` : ""}
@@ -3636,7 +3641,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261031214015";
+const BUILD = "20261031214357";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
