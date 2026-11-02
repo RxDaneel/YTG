@@ -559,7 +559,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catc
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats", "peers"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats", "peers", "imp"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -1299,6 +1299,8 @@ function topics(){
   for (const t in chs) score[t] = chs[t].size;
   const bump = (list, w) => list.forEach(v => (v.tags || []).forEach(t => { if (good(t)) score[t] = (score[t] || 0) + w; }));
   bump(S.nope, -4);                                           // solo i tag dei creator che segui (più quelli aggiunti a mano)
+  const T = taste();                                          // più i temi che guardi davvero fino in fondo e quelli che cerchi
+  for (const [t, w] of Object.entries(T.tag)) if (w > 0 && good(t)) score[t] = (score[t] || 0) + Math.min(5, w / 2);
   const ranked = Object.entries(score).filter(([, s]) => s >= 3).sort((a, b) => b[1] - a[1]).map(x => x[0]);
   const out = (S.myTopics || []).filter(t => !muted.has(t.toLowerCase())).slice();
   for (const t of ranked) { if (!out.some(o => o.includes(t) || t.includes(o))) out.push(t); if (out.length >= 10) break; }
@@ -1312,7 +1314,8 @@ function interleave(lists){
 }
 /* Canali che guardi o a cui metti like ma a cui non sei iscritto: i loro ultimi video entrano nella Home. */
 function favChannels(p){
-  return Object.entries(p.ch).filter(([id, w]) => w >= 4 && !isSub(id) && !S.blocked[id]).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8);
+  const T = taste();
+  return Object.entries(T.ch).filter(([id, w]) => w >= 4 && !isSub(id) && !S.blocked[id]).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 8);
 }
 /* Video costruiti dalla playlist stessa: 1 unità invece di 2 (manca solo la durata) */
 function fromPlaylistItem(it){
@@ -1347,22 +1350,114 @@ async function channelLatest(id){
    D) pochi video nuovi molto vicini ai tuoi interessi, da canali che escono più volte nelle ricerche sui tuoi temi.
    Ogni 10 video: 5 S, 2 P, 3 D (D si può spegnere nelle impostazioni; se un gruppo finisce, si riempie con gli altri).
    Esclusi: già visti, "Non mi interessa", Non mi piace, canali nascosti, altre lingue (per i canali non seguiti). */
-function chAffinity(){
-  const a = {};
-  S.likes.forEach(v => v.ch && (a[v.ch] = (a[v.ch] || 0) + 3));
-  S.hist.forEach(v => v.ch && (a[v.ch] = (a[v.ch] || 0) + 2));
-  S.nope.forEach(v => v.ch && (a[v.ch] = (a[v.ch] || 0) - 3));
-  return a;
+/* ---------- il modello dei gusti, con i segnali che usa anche YouTube ----------
+   1) cronologia e ricerche: cosa apri e cosa cerchi;
+   2) CTR: quante volte apri un video dopo averlo visto in Home o Iscrizioni (per canale);
+   3) tempo di visione e quanto ne guardi: un video finito vale molto, uno chiuso dopo pochi secondi conta contro;
+   4) interazioni: Mi piace, commenti, segnalibri, Guarda più tardi, "Non mi interessa";
+   5) contesto: ora del giorno (cosa guardi a quest'ora e di che durata) e dispositivo (la cronologia è di questo dispositivo).
+   I segnali vecchi pesano meno (dimezzano in circa un mese). */
+let tasteCache = null, tasteKey = "", impTick = 0;
+const durBucket = s => !s ? -1 : s < 480 ? 0 : s < 1200 ? 1 : s < 2700 ? 2 : 3;
+const DUR_NAMES = ["brevi (sotto gli 8 minuti)", "da 8 a 20 minuti", "da 20 a 45 minuti", "lunghi (oltre 45 minuti)"];
+/* quanto ti è piaciuto un video aperto: −1 chiuso subito … 3 guardato fino in fondo */
+function engageOf(id, at, dur){
+  const p = S.pos?.[id], w = S.stats?.vid?.[id]?.[0] || 0, d = p?.d || dur || 0;
+  const fresh = Date.now() - (at || 0) < 3600e3;                    // aperto da poco: forse lo stai ancora guardando
+  if (!p && !w) return fresh ? 0 : -.5;
+  const posF = p ? (p.done ? 1 : Math.min(1, p.t / (p.d || 1))) : 0, wF = d && w ? Math.min(1, w / d) : null;
+  const f = wF == null ? posF : Math.max(wF, Math.min(posF, wF + .3));     // saltare avanti non conta come guardare
+  if (f >= .85) return 3;
+  if (f >= .5 || w >= 900) return 2;
+  if (f >= .2 || w >= 240) return 1;
+  if (fresh) return .3;
+  return f < .1 && w < 45 ? -1 : .3;
 }
+function taste(){
+  const hr = new Date().getHours();
+  const key = [S.hist.length, S.hist[0]?.id, S.likes.length, S.nope.length, impTick, hr, (S.myComments || []).length, S.later.length, S.marks.length, Object.keys(S.stats?.qs || {}).length, Math.floor(Date.now() / 600000)].join(":");
+  if (tasteCache && tasteKey === key) return tasteCache;
+  const now = Date.now(), ch = {}, tag = {}, cat = {}, ctxCh = {}, chEv = {}, durAll = [0, 0, 0, 0], durCtx = [0, 0, 0, 0];
+  let evAll = 0, evCtx = 0;
+  const add = (o, k, x) => { if (k) o[k] = (o[k] || 0) + x; };
+  const inCtx = ts => { const d = Math.abs(new Date(ts).getHours() - hr); return Math.min(d, 24 - d) <= 2; };
+  const seen = new Set();
+  for (const e of S.hist) {
+    if (e.id) { if (seen.has(e.id)) continue; seen.add(e.id); }
+    const at = e.at || 0, decay = at ? Math.pow(.5, (now - at) / (30 * 864e5)) : .5;
+    const g = e.id && at ? engageOf(e.id, at, e.dur) : 1;
+    if (e.id && at) { const c = chEv[e.ch] || (chEv[e.ch] = { n: 0, f: 0 }); c.n++; c.f += g; }
+    if (g < 0) { add(ch, e.ch, 1.5 * g * decay); for (const t of new Set(e.tags || [])) add(tag, normTxt(t), .3 * g * decay); continue; }
+    const wgt = (1 + g) * decay;                                      // 1 aperto … 4 finito
+    add(ch, e.ch, wgt); add(cat, e.cat, wgt * .3);
+    for (const t of new Set(e.tags || [])) add(tag, normTxt(t), wgt * .5);
+    evAll += wgt; if (at && inCtx(at)) { add(ctxCh, e.ch, wgt); evCtx += wgt; }
+    const b = durBucket(e.dur || S.pos?.[e.id]?.d || 0);
+    if (b >= 0 && g >= 1) { durAll[b] += decay; if (at && inCtx(at)) durCtx[b] += decay; }
+  }
+  S.likes.forEach(v => { add(ch, v.ch, 3); add(cat, v.cat, 1); for (const t of v.tags || []) add(tag, normTxt(t), 1); });
+  for (const c of S.myComments || []) { const v = CACHE.get(c.v) || S.pos?.[c.v]?.v; if (v) add(ch, v.ch, 2); }
+  S.marks.forEach(m => add(ch, m.v?.ch, 1)); S.later.slice(0, 100).forEach(v => add(ch, v.ch, .5));
+  S.nope.forEach(v => { add(ch, v.ch, -6); add(cat, v.cat, -1); for (const t of v.tags || []) add(tag, normTxt(t), -2); });
+  for (const [q, n] of Object.entries(S.stats?.qs || {})) for (const w of normTxt(q).split(/\s+/)) if (w.length > 2 && !STOPW.has(w)) add(tag, w, Math.log2(1 + n) * 1.5);
+  // CTR per canale, confrontato con la tua media (con un po' di prudenza finché i numeri sono piccoli)
+  const C = S.chImp || {}; let I = 0, K = 0; for (const [i, c] of Object.values(C)) { I += i; K += c; }
+  const gctr = (K + 1) / (I + 10), ctr = {};
+  for (const [id, [i, c]] of Object.entries(C)) if (i >= 4) ctr[id] = Math.max(-2, Math.min(2, Math.log2(((c + .5) / (i + 5)) / gctr)));
+  // contesto: canali che guardi soprattutto a quest'ora
+  const ctx = {};
+  if (evCtx >= 3) for (const id in ctxCh) { const share = ctxCh[id] / evCtx, base = Math.max(0, ch[id] || 0) / Math.max(1, evAll); ctx[id] = Math.max(0, Math.min(1.5, (share - base) * 6)); }
+  const pick = durCtx.reduce((a, b) => a + b, 0) >= 3 ? durCtx : durAll, tot = pick.reduce((a, b) => a + b, 0);
+  tasteCache = { ch, tag, cat, ctr, ctx, chEv, dur: tot >= 3 ? pick.map(x => x / tot) : null, I, K, hr };
+  tasteKey = key; return tasteCache;
+}
+const chScore = (T, id) => { const w = T.ch[id] || 0; return Math.log2(1 + Math.max(0, w)) * 1.5 + Math.min(0, w) * .5 + (T.ctr[id] || 0) * 1.2 + (T.ctx[id] || 0); };
+function videoBonus(T, v){
+  let s = 0;
+  if (T.dur && v.dur && !v.live) { const p = T.dur[durBucket(v.dur)]; s += p >= .35 ? .8 : p < .08 ? -.6 : 0; }
+  const im = S.imp?.[v.id]; if (im && !im.c) s -= Math.min(3, Math.max(0, im.n - 1) * .8);     // te l'ho già mostrato e non l'hai aperto
+  if (v.views > 2000 && v.likes) { const r = v.likes / v.views; s += r > .05 ? .4 : r < .01 ? -.3 : 0; }   // piace a chi lo guarda
+  return s;
+}
+function chAffinity(){ const T = taste(), a = {}; for (const id of new Set([...Object.keys(T.ch), ...Object.keys(T.ctr)])) a[id] = (T.ch[id] || 0) + (T.ctr[id] || 0) * 2; return a; }
+
+/* ---------- impressioni: un video conta come "visto in elenco" se resta per almeno un secondo quasi tutto sullo schermo ---------- */
+function countImp(v){
+  if (!v?.id) return;
+  const I = S.imp || (S.imp = {}), now = Date.now(), e = I[v.id] || (I[v.id] = { n: 0, at: 0 });
+  if (now - e.at < 30 * 60000) return;                    // lo stesso video al massimo una volta ogni mezz'ora
+  e.n++; e.at = now; impTick++;
+  const C = S.chImp || (S.chImp = {}), c = C[v.ch] || (C[v.ch] = [0, 0]); c[0]++;
+  const k = Object.keys(I); if (k.length > 4000) k.sort((a, b) => I[a].at - I[b].at).slice(0, k.length - 4000).forEach(x => delete I[x]);
+  save();
+}
+function noteClick(v){
+  const I = S.imp || (S.imp = {});
+  if (!I[v.id] || Date.now() - I[v.id].at > 30 * 60000) countImp(v);
+  if (I[v.id] && !I[v.id].c) { I[v.id].c = 1; const C = S.chImp || (S.chImp = {}), c = C[v.ch] || (C[v.ch] = [0, 0]); c[1]++; impTick++; }
+}
+let impT = 0;
+function impScan(){
+  clearTimeout(impT);
+  impT = setTimeout(() => {
+    if (document.hidden || (tab !== "vHome" && tab !== "vSubs") || document.querySelector(".sheet.open")) return;
+    const vh = innerHeight;
+    document.querySelectorAll(`#${tab} .card[data-v]`).forEach(el => {
+      const r = el.getBoundingClientRect(); if (!r.height) return;
+      if ((Math.min(r.bottom, vh) - Math.max(r.top, 0)) / r.height >= .6) countImp(CACHE.get(el.dataset.v));
+    });
+  }, 1200);
+}
+document.getElementById("main").addEventListener("scroll", impScan, { passive: true });
 const freshOk = v => !S.watched[v.id] && !S.hidden[v.id] && !S.blocked[v.ch];
 function subsPool(skip){
-  const a = chAffinity(), now = Date.now();
+  const T = taste(), now = Date.now();
   const pick = d => S.videos.filter(v => freshOk(v) && !skip?.has(v.id) && now - Date.parse(v.at) < d * 864e5);
   let list = pick(30); if (list.length < 60) list = pick(150);
   return list.map(v => {
-    const d = (now - Date.parse(v.at)) / 864e5, w = a[v.ch] || 0;
-    let s = Math.log2(1 + Math.max(0, w)) * 1.5 + Math.min(0, w) * .5 + (d < 1 ? 4 : d < 3 ? 3 : d < 7 ? 2 : d < 14 ? 1 : 0) - d / 30;
-    s += -(S.homeSeen[v.id] || 0) * .7 + Math.random() * 1.2;
+    const d = (now - Date.parse(v.at)) / 864e5;
+    let s = chScore(T, v.ch) + videoBonus(T, v) + (d < 1 ? 4 : d < 3 ? 3 : d < 7 ? 2 : d < 14 ? 1 : 0) - d / 30;
+    s += -(S.homeSeen[v.id] || 0) * .3 + Math.random() * 1.2;
     return [s, v];
   }).sort((x, y) => y[0] - x[0]).map(x => x[1]);
 }
@@ -1388,13 +1483,13 @@ async function fetchPopular(n){
   await Promise.all(todo.map(id => channelPopular(id).catch(() => [])));
 }
 function popPool(p, skip){
-  const a = chAffinity(), out = [];
+  const T = taste(), out = [];
   for (const id of popChannels()) { const c = S.relCache["pop:" + id]; if (c) c.list.forEach(v => out.push(v)); }
   for (const id of favChannels(p)) { const c = S.relCache["ch:" + id]; if (c) c.list.forEach(v => langOk(v) && out.push(v)); }
   const seen = new Set();
   return remember(out.filter(v => freshOk(v) && !isKids(v) && !skip?.has(v.id) && !seen.has(v.id) && seen.add(v.id))).map(v => {
-    let s = Math.log2(1 + Math.max(0, a[v.ch] || 0)) * 1.5 + Math.log10(1 + (v.views || 0)) * .3;
-    s += -(S.homeSeen[v.id] || 0) * .7 + Math.random() * 1.5;
+    let s = chScore(T, v.ch) + videoBonus(T, v) + Math.log10(1 + (v.views || 0)) * .3;
+    s += -(S.homeSeen[v.id] || 0) * .3 + Math.random() * 1.5;
     return [s, v];
   }).sort((x, y) => y[0] - x[0]).map(x => x[1]);
 }
@@ -1479,7 +1574,7 @@ async function loadHome(manual, noFetch, auto){
 function homeOk(v, p){ return !S.watched[v.id] && !S.blocked[v.ch] && !S.hidden[v.id] && !isSub(v.ch) && (p.ch[v.ch] || 0) >= 0 && langOk(v); }
 let vocabCache = null, vocabKey = "";
 function interestVocab(){
-  const key = S.videos.length + ":" + S.likes.length + ":" + S.hist.length + ":" + S.nope.length + ":" + (S.myTopics || []).join("|") + ":" + S.mutedTopics.length;
+  const key = S.videos.length + ":" + S.likes.length + ":" + S.hist.length + ":" + (S.hist[0]?.id || "") + ":" + S.nope.length + ":" + (S.myTopics || []).join("|") + ":" + S.mutedTopics.length + ":" + Object.keys(S.stats?.qs || {}).length + ":" + Math.floor(Date.now() / 1800000);
   if (vocabCache && vocabKey === key) return vocabCache;
   const per = new Map(), w = new Map();
   const ok = x => x.length > 2 && !STOPW.has(x) && !GENERIC.has(x) && !/^\d+$/.test(x);
@@ -1487,7 +1582,9 @@ function interestVocab(){
   for (const v of S.videos) for (const x of split(v)) (per.get(x) || per.set(x, new Set()).get(x)).add(v.ch);
   for (const [x, chs] of per) if (chs.size >= 2) w.set(x, Math.log2(1 + chs.size));
   const add = (list, k) => list.forEach(v => split({ title: v.title || "", tags: v.tags || [] }).forEach(x => w.set(x, (w.get(x) || 0) + k)));
-  add(S.likes, 2); add(S.hist.map(h => ({ tags: h.tags })), 1.5); add(S.nope, -2);
+  add(S.likes, 2); add(S.nope, -2);
+  for (const h of S.hist) { const g = h.id && h.at ? engageOf(h.id, h.at, h.dur) : 1; split({ title: h.t || "", tags: h.tags || [] }).forEach(x => w.set(x, (w.get(x) || 0) + (g < 0 ? -.5 : .5 + g * .5))); }
+  for (const [q, n] of Object.entries(S.stats?.qs || {})) split({ title: q, tags: [q] }).forEach(x => w.set(x, (w.get(x) || 0) + Math.log2(1 + n) * 1.5));
   for (const t of S.myTopics || []) split({ title: t, tags: [t] }).forEach(x => w.set(x, (w.get(x) || 0) + 6));
   for (const t of S.mutedTopics) split({ title: t, tags: [t] }).forEach(x => w.set(x, -4));
   vocabCache = w; vocabKey = key; return w;
@@ -1525,17 +1622,17 @@ const KIDS_RE = /\b(for kids|kids songs?|per bambini|bambini|nursery|filastrocc\
 const isKids = v => !!v.kids || KIDS_RE.test(v.title || "");
 const TAG_MIN = 2;
 function rankHome(lists, p, skip, min){
-  const w = interestVocab(), strict = min ? w.size > 0 : w.size > 30, need = min || REL_MIN;
+  const w = interestVocab(), strict = min ? w.size > 0 : w.size > 30, need = min || REL_MIN, T = taste();
   const now = Date.now(), best = new Map();
   for (const l of lists) for (const [v, base] of l) {
     if (!homeOk(v, p) || skip?.has(v.id) || isKids(v)) continue;
     const rel = relevance(v, w);
     if (min) { if (tagScore(v) < TAG_MIN) continue; }          // canali che non segui: devono avere i tag dei tuoi creator
     else if (strict && rel < need) continue;                   // fuori dai tuoi interessi: non entra
-    let s = base + Math.min(rel, 15) * .5 + (p.ch[v.ch] || 0) * 1.2 + (p.cat[v.cat] || 0) * .15;
-    for (const t of v.tags || []) s += Math.max(-4, Math.min(4, p.tag[t] || 0)) * .6;
+    let s = base + Math.min(rel, 15) * .5 + chScore(T, v.ch) * 1.2 + (T.cat[v.cat] || 0) * .15 + videoBonus(T, v);
+    for (const t of new Set((v.tags || []).map(normTxt))) s += Math.max(-4, Math.min(4, T.tag[t] || 0)) * .5;
     const days = (now - Date.parse(v.at)) / 864e5; if (days < 3) s += 1; else if (days < 21) s += .4;
-    s += -(S.homeSeen[v.id] || 0) * 2 + Math.random() * 1.5;
+    s += -(S.homeSeen[v.id] || 0) * 1 + Math.random() * 1.5;
     if (!best.has(v.id) || best.get(v.id)[0] < s) best.set(v.id, [s, v]);
   }
   return [...best.values()].filter(([s]) => s > -1).sort((a, b) => b[0] - a[0]).map(x => x[1]);
@@ -1614,10 +1711,36 @@ function notInterested(v){
 function cardMenu(id){
   const v = CACHE.get(id); if (!v) return;
   menuVideo = v;
-  showMenu([["mNope", "Non mi interessa"], ["mBlock", "Non consigliare il canale"],
+  showMenu([["mWhy", "Perché vedo questo video?"], ["mNope", "Non mi interessa"], ["mBlock", "Non consigliare il canale"],
     [inLater(id) ? "mUnlater" : "mLater", inLater(id) ? "Rimuovi da Guarda più tardi" : "Salva in Guarda più tardi"], ["closeMenu", "Annulla"]]);
 }
 let menuVideo = null;
+function whyList(v){
+  const T = taste(), r = [], name = `<b>${esc(v.chTitle || "questo canale")}</b>`, sub = isSub(v.ch), cw = T.ch[v.ch] || 0;
+  if (sub) r.push(`Sei iscritto a ${name}`);
+  else if (cw >= 4) r.push(`Guardi i video di ${name} anche se non sei iscritto`);
+  else r.push(`${name} è un canale che non segui, scelto perché parla dei temi dei creator che segui`);
+  const e = T.chEv[v.ch];
+  if (e?.n) r.push(`Hai aperto ${e.n} suo${e.n === 1 ? "" : "i"} video ${e.f / e.n >= 2 ? "e di solito li guardi fino in fondo" : e.f / e.n >= 1 ? "e ne guardi una buona parte" : e.f / e.n < 0 ? "ma di solito li chiudi presto: per questo ne vedi meno" : ""}`.trim());
+  if (S.likes.some(l => l.ch === v.ch)) r.push("Hai messo Mi piace ad altri suoi video");
+  if ((T.ctr[v.ch] || 0) >= .5) r.push("Quando vedi i suoi video in elenco, li apri spesso");
+  else if ((T.ctr[v.ch] || 0) <= -.5) r.push("Quando vedi i suoi video in elenco, di solito non li apri: per questo stanno più in basso");
+  if ((T.ctx[v.ch] || 0) >= .4) r.push(`Verso quest'ora guardi spesso ${name}`);
+  const tg = [...new Set((v.tags || []).map(normTxt))].filter(t => (T.tag[t] || 0) >= 2).sort((a, b) => T.tag[b] - T.tag[a]).slice(0, 3);
+  if (tg.length) r.push(`Parla di temi che guardi: ${tg.map(esc).join(", ")}`);
+  const title = " " + normTxt(v.title) + " ", q = Object.keys(S.stats?.qs || {}).find(q => q.length > 3 && q.split(/\s+/).every(w => w.length < 3 || title.includes(w)));
+  if (q) r.push(`Hai cercato “${esc(q)}”`);
+  if (T.dur && v.dur && T.dur[durBucket(v.dur)] >= .35) r.push(`A quest'ora guardi soprattutto video ${DUR_NAMES[durBucket(v.dur)]}`);
+  if (Date.now() - Date.parse(v.at) < 2 * 864e5) r.push("È uscito da poco");
+  const im = S.imp?.[v.id]; if (im?.n >= 2 && !im.c) r.push(`Te l'ho già mostrato ${im.n} volte: se non lo apri, scende`);
+  return r;
+}
+function showWhy(v){
+  if (!v) return; closeMenu();
+  document.body.insertAdjacentHTML("beforeend", `<div class="scrim" data-act="closeMenu"></div><div class="menu"><div style="padding:12px 14px 2px;font-weight:700;font-size:15px">Perché vedi questo video</div>
+    <ul style="margin:6px 0 4px;padding:0 14px 0 32px;font-size:14px;line-height:1.45">${whyList(v).map(x => `<li style="margin:5px 0">${x}</li>`).join("")}</ul>
+    <button data-act="mNope">Non mi interessa</button><button data-act="closeMenu">Chiudi</button></div>`);
+}
 
 /* Ricerca su tutto YouTube (costa 100 unità di quota a ricerca) */
 let searchLocal = null, searchYT = false;
@@ -1832,6 +1955,7 @@ function renderHome(){
     : shown.length < list.length || !homeMoreEnd ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="homeMore" style="font-size:13px;padding:8px 14px">Altri video</button></div>`
     : `<div class="status" style="padding:16px;text-align:center">Per ora è tutto: trascina in basso per aggiornare.</div>`;
   v.innerHTML = head + shown.map(x => card(x, true)).join("") + tail;
+  impScan();
 }
 /* arrivando in fondo alla Home se ne caricano altri da soli */
 document.getElementById("main").addEventListener("scroll", e => {
@@ -1905,7 +2029,7 @@ function renderSubs(){
     html += card(x);
   }
   if (shownList.length < list.length) html += `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="subsMore" style="font-size:13px;padding:8px 14px">Altri video</button></div>`;
-  v.innerHTML = html;
+  v.innerHTML = html; impScan();
 }
 
 /* ---------- cronologia delle ricerche ---------- */
@@ -2036,7 +2160,7 @@ function themePicker(){
 }
 /* ---------- backup ----------
    Tutto quello che sta solo su questo telefono. Restano fuori l'accesso a Google (si rifà) e le cache che si riscaricano. */
-const BK_SKIP = new Set(["devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
+const BK_SKIP = new Set(["imp", "devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
 function exportBackup(){
   const data = {}; for (const k in S) if (!BK_SKIP.has(k)) data[k] = S[k];
   const now = new Date(), name = `YTG-backup-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.json`;
@@ -2520,6 +2644,26 @@ function renderStatsPage(){
           <button class="more" data-act="meSubs" style="font-size:13px">Gestisci iscrizioni ›</button></div></div>`);
   }
 
+  // cosa ha imparato la Home
+  {
+    const T = taste(), chips = [];
+    const ctrPct = T.I >= 20 ? Math.round(T.K / T.I * 100) : null;
+    const C = Object.entries(S.chImp || {}).filter(([, [i]]) => i >= 5);
+    const opened = C.filter(([id]) => (T.ctr[id] || 0) >= .5).sort((a, b) => T.ctr[b[0]] - T.ctr[a[0]]).slice(0, 5).map(([id]) => chName(id) || subMap().get(id)?.title).filter(Boolean);
+    const skipped = C.filter(([id]) => (T.ctr[id] || 0) <= -1).sort((a, b) => T.ctr[a[0]] - T.ctr[b[0]]).slice(0, 5).map(([id]) => chName(id) || subMap().get(id)?.title).filter(Boolean);
+    const tg = Object.entries(T.tag).filter(([t, w]) => w >= 2 && t.length > 2 && !GENERIC.has(t) && !STOPW.has(t)).sort((a, b) => b[1] - a[1]).slice(0, 10).map(x => x[0]);
+    const bi = T.dur ? T.dur.indexOf(Math.max(...T.dur)) : -1;
+    const lines = [];
+    if (ctrPct !== null) lines.push(`Apri il <b>${ctrPct}%</b> dei video che vedi in Home e Iscrizioni (${T.K} su ${T.I}).`);
+    if (bi >= 0) lines.push(`Verso quest'ora (${T.hr}:00) guardi soprattutto video <b>${DUR_NAMES[bi]}</b>: li metto più in alto.`);
+    if (opened.length) lines.push(`Quando li vedi, apri quasi sempre: ${opened.map(n => `<b>${esc(n)}</b>`).join(", ")}.`);
+    if (skipped.length) lines.push(`Di solito salti: ${skipped.map(n => esc(n)).join(", ")}. Li mostro più in basso.`);
+    if (lines.length || tg.length) html.push(`<div class="shead"><h3>Cosa ha imparato la Home</h3></div>
+      <div class="panel stp">${lines.map(l => `<div style="font-size:14px;line-height:1.45;margin-bottom:8px">${l}</div>`).join("")}
+        ${tg.length ? `<h4 style="margin-top:4px">Temi che guardi di più (fino in fondo pesano di più)</h4><div class="chips" style="padding:6px 0 0;flex-wrap:wrap">${tg.map(t => `<button class="chip" data-q="${esc(t)}" style="padding:6px 12px;border:0;color:var(--fg)">${esc(t)}</button>`).join("")}</div>` : ""}
+        <div class="stline">Su ogni video della Home, ⋯ → “Perché vedo questo video?” ti dice cosa ha contato.</div></div>`);
+  }
+
   // quota
   const Qd = SV.q || {}, qk = Object.keys(Qd).sort().slice(-Math.min(n, 120));
   if (qk.length) {
@@ -2879,7 +3023,8 @@ function openVideo(id, start){
   stopPreview();
   $("#notifs").classList.remove("open"); closeSheet("#cmts");
   current = x; myRating = "none"; S.watched[id] = Date.now(); statOpen(src);
-  S.hist = [{ cat: x.cat, ch: x.ch, tags: x.tags || [] }].concat(S.hist.filter((_, i) => i < 149)); save();
+  S.hist = [{ id, t: (x.title || "").slice(0, 120), cat: x.cat, ch: x.ch, tags: (x.tags || []).slice(0, 15), at: Date.now(), dur: x.dur || 0 }].concat(S.hist.filter((_, i) => i < 299)); save();
+  if (src === "home" || src === "iscr") noteClick(x);
   startPlayer(id, start);
   $("#pExt").href = "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
   statsFor = "";
@@ -4019,6 +4164,7 @@ document.addEventListener("click", e => {
   if (a === "closeMenu") closeMenu();
   if (a === "qinfo") { const u = S.qDay === qDay() ? S.qUsed || 0 : 0; return toast(quotaOut() ? "Unità finite per oggi: tornano alle 9:00" : `Oggi: ${u.toLocaleString("it-IT")} unità su 10.000 · si azzerano alle 9:00`); }
   if (a === "mNope") { closeMenu(); return notInterested(menuVideo); }
+  if (a === "mWhy") return showWhy(menuVideo);
   if (a === "mBlock" && menuVideo) { closeMenu(); S.blocked[menuVideo.ch] = 1; S.home = S.home.filter(v => v.ch !== menuVideo.ch); save(); rerender(); return toast(`Non vedrai più ${menuVideo.chTitle} nella Home`); }
   if (a === "mLater") { closeMenu(); return toggleLater(menuVideo, true); }
   if (a === "mUnlater") { closeMenu(); return toggleLater(menuVideo, false); }
@@ -4213,7 +4359,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102232527";
+const BUILD = "20261102233751";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
