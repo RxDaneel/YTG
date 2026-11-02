@@ -159,6 +159,7 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .stch .b i{display:block;height:100%;background:var(--accent)}
 .stch .t{font-size:12px;color:var(--muted);flex:none;min-width:62px;text-align:right}
 .sbar span{white-space:nowrap}
+.deskonly{display:none}
 .sbar[data-tip]{cursor:pointer}
 .stgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 16px 8px}
 .stile{background:var(--surface);border-radius:14px;padding:12px 14px;min-width:0}
@@ -421,6 +422,8 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   #vHome>:not(.cwrap):not(.card),#vSubs>:not(.cwrap):not(.card){grid-column:1/-1}
   #sRes{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));column-gap:18px;align-content:start}
   #sRes>:not(.card):not(.cwrap){grid-column:1/-1}
+  :root[data-cols] #vHome,:root[data-cols] #vSubs,:root[data-cols] #sRes{grid-template-columns:repeat(var(--cols),minmax(0,1fr));column-gap:22px}
+  .deskonly{display:block}
   #vMe,#vSettings,#vChannels{max-width:900px;margin:0 auto}
   .thumb{border-radius:12px}
   .card .meta,.cwrap .meta{padding-left:0;padding-right:36px}
@@ -1911,6 +1914,12 @@ function applyTheme(t){
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg || "#000000");
 }
 applyTheme(S.opt.theme);
+/* video per riga su PC (0 = automatico, quanti ne stanno) */
+function applyCols(){
+  const n = S.opt.cols ?? 4, r = document.documentElement;
+  if (n) { r.dataset.cols = n; r.style.setProperty("--cols", n); } else { delete r.dataset.cols; r.style.removeProperty("--cols"); }
+}
+applyCols();
 function themePicker(){
   const cur = S.opt.theme;
   return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${k}" aria-pressed="${k === cur}">
@@ -1939,7 +1948,7 @@ function importBackup(text){
   if (!confirm(`Ripristinare il backup${when ? " del " + when : ""}? I dati di YTG su questo telefono verranno sostituiti.`)) return;
   for (const k in b.data) if (!BK_SKIP.has(k)) S[k] = b.data[k];
   S.opt = Object.assign({}, DEF_OPT, S.opt || {});
-  S.homeFetch = 0; saveNow(); applyTheme(S.opt.theme);
+  S.homeFetch = 0; saveNow(); applyTheme(S.opt.theme); applyCols();
   toast("Backup ripristinato"); setTimeout(() => location.reload(), 1500);
 }
 function renderSettings(){
@@ -1957,6 +1966,12 @@ function renderSettings(){
 
     <h2 style="margin-top:22px">Tema</h2>
     ${themePicker()}
+    <div class="deskonly">
+      <h2 style="margin-top:22px">Video per riga</h2>
+      <div class="panel" style="padding:14px"><div class="chips" style="padding:0;flex-wrap:wrap">${[[0, "Automatico"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"]].map(([k, l]) =>
+        `<button class="chip chipq${(o.cols ?? 4) === k ? " on" : ""}" data-cols="${k}" style="padding:7px 16px">${l}</button>`).join("")}</div>
+        <div class="sub" style="margin-top:10px">Solo su schermi grandi (PC): Home, Iscrizioni e Ricerca. Automatico mette tutti quelli che stanno nella finestra.</div></div>
+    </div>
     <h2 style="margin-top:22px">Contenuti</h2>
     <div class="panel">
       <label class="toggle"><div>Mostra la Home<small>Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
@@ -3802,6 +3817,8 @@ document.addEventListener("click", e => {
   if (sk) { e.preventDefault(); if (sk.closest("#cmts")) closeSheet("#cmts"); if (ok()) { yp.seekTo(+sk.dataset.seek, true); yp.playVideo(); $("#player").scrollTop = 0; } return; }
   const gp = e.target.closest("[data-grp]");
   if (gp) { S.subsGroup = gp.dataset.grp; save(); subsShow = 40; renderSubs(); return toTop(); }
+  const cl = e.target.closest("[data-cols]");
+  if (cl && cl.tagName === "BUTTON") { S.opt.cols = +cl.dataset.cols; save(); applyCols(); return renderSettings(); }
   const tp = e.target.closest("[data-theme-pick]");
   if (tp) { S.opt.theme = tp.dataset.themePick; save(); applyTheme(S.opt.theme); return renderSettings(); }
   const t = e.target.closest("[data-mute],[data-cm],[data-nv],[data-unlater],[data-mypl],[data-ch],[data-close],[data-pl],[data-ctab],[data-tab],[data-v],[data-go],[data-act],[data-del],[data-replies],[data-q]"); if (!t) return;
@@ -4049,7 +4066,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102230957";
+const BUILD = "20261102231311";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
