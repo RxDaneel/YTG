@@ -122,6 +122,7 @@ main{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scro
 nav{position:relative;flex:none;z-index:30;display:flex;background:var(--bg);border-top:1px solid var(--line);
   padding-bottom:var(--bot)}
 nav button{flex:1;height:var(--nav-h);border:0;background:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;color:var(--muted)}
+nav .navdesk{display:none}
 nav button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 nav button[aria-current="true"]{color:var(--fg);font-weight:600}
 nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
@@ -413,6 +414,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   nav{grid-area:nav;flex-direction:column;justify-content:flex-start;gap:2px;border-top:0;border-right:1px solid var(--line);padding:12px 10px}
   nav button{flex:none;height:46px;flex-direction:row;justify-content:flex-start;gap:18px;padding:0 14px;border-radius:10px;font-size:14.5px}
   nav button:hover{background:var(--surface)}
+  nav .navdesk{display:flex}
   nav button[aria-current="true"]{background:var(--surface)}
   .hsearch{max-width:620px;margin-left:auto;margin-right:auto}
   header.searching h1,header.searching .icon-btn{display:revert}
@@ -468,6 +470,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <button data-tab="vHome" id="navHome"><svg viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg>Home</button>
   <button data-tab="vSubs"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M7 3.5h10M5 5.2h14"/><path d="m10.5 11 4 2.5-4 2.5z"/></svg>Iscrizioni</button>
   <button data-tab="vMe"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4 20.5c1.2-4 4.3-6 8-6s6.8 2 8 6"/></svg>Tu</button>
+  <button data-act="meStats" class="navdesk" id="navStats"><svg viewBox="0 0 24 24"><path d="M4 20h16M7 16.5V11M12 16.5V6M17 16.5v-3.5"/></svg>Statistiche</button>
 </nav>
 
 <div id="edge" hidden aria-hidden="true"></div>
@@ -2413,7 +2416,6 @@ function statVRow(x, sub){
 /* --- riquadro nel profilo --- */
 function statsHTML(){
   SV = statsView();
-  if (!Object.keys(SV.days).length) return "";
   const a = statsAgg(7), p = statsAgg(7, daysAgo(7));
   const opened = Object.values(S.watched).filter(t => t > Date.now() - 7 * 864e5).length;
   const diff = p.s ? Math.round((a.s - p.s) / p.s * 100) : null;
@@ -3656,6 +3658,8 @@ function myHistory(){
 
 function renderMe(){
   const v = $("#vMe"); if (!v) return;
+  const onSt = tab === "vMe" && (ME.pl?.id === "stats" || ME.pl?.id === "stch");
+  $("#navStats")?.setAttribute("aria-current", onSt); if (tab === "vMe") $('nav [data-tab="vMe"]')?.setAttribute("aria-current", !onSt);
   if (ME.pl) return renderMyPlaylist();
   const d = S.meData, hist = myHistory();
   const head = d?.chan
@@ -3686,7 +3690,7 @@ function renderMe(){
     ${hist.length ? `<div class="shead"><h3>Cronologia</h3><span class="sub">video aperti in YTG</span></div>
       <div class="hrow">${hist.map(hcard).join("")}</div>` : ""}
 
-    ${statsHTML()}
+    ${(() => { try { return statsHTML(); } catch (e) { console.error(e); return `<div class="status err" style="padding:8px 16px">Statistiche non disponibili: ${esc(e.message)}</div>`; } })()}
 
     <div class="shead"><h3>Playlist</h3><span class="sub">${d ? d.playlists.length + 3 : 2}</span></div>
     ${subsRow}
@@ -3834,8 +3838,10 @@ async function unsubscribeMany(){
 function renderMyPlaylist(){
   const v = $("#vMe"), pl = ME.pl;
   if (pl.id === "subs") return renderSubsManager();
-  if (pl.id === "stats") return renderStatsPage();
-  if (pl.id === "stch") return renderChanStats();
+  if (pl.id === "stats" || pl.id === "stch") {
+    try { return pl.id === "stats" ? renderStatsPage() : renderChanStats(); }
+    catch (e) { console.error(e); v.innerHTML = `<div style="padding:10px 16px"><button class="more" data-act="meBack">‹ Tu</button></div><div class="status err" style="padding:8px 16px">Statistiche non disponibili: ${esc(e.message)}</div>`; return; }
+  }
   if (pl.id === "marks") {
     v.innerHTML = `<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
         <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Segnalibri</h2>
@@ -4207,7 +4213,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102232105";
+const BUILD = "20261102232527";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
