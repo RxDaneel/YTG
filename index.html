@@ -556,7 +556,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catc
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats", "peers"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -678,7 +678,7 @@ let refreshing = null;
 function refreshToken(){
   if (!S.refresh || !authSrv()) return Promise.resolve(false);
   if (!refreshing) refreshing = authCall("/refresh", { refresh_token: S.refresh }).then(j => {
-    S.token = j.access_token; S.tokenScope = SCOPE; S.tokenExp = Date.now() + (+j.expires_in || 3600) * 1000; save(); return true;
+    S.token = j.access_token; S.tokenScope = SCOPE; if (j.scope) S.grant = j.scope; S.tokenExp = Date.now() + (+j.expires_in || 3600) * 1000; save(); return true;
   }).catch(e => { if (e.code === "invalid_grant") { S.refresh = ""; save(); toast("Accesso permanente revocato: accedi di nuovo"); } return false; })
     .finally(() => { refreshing = null; });
   return refreshing;
@@ -692,7 +692,7 @@ function startLogin(after){
   try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
   const code = !!authSrv() && !after?.silent;
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: code ? "code" : "token",
-    scope: SCOPE, include_granted_scopes: "true", state,
+    scope: SCOPE + (S.opt.sync || after?.do === "syncOn" ? " " + DRIVE : ""), include_granted_scopes: "true", state,
     ...(code ? { access_type: "offline", prompt: "consent" + (S.me && !after?.pick ? "" : " select_account") }
       : after?.silent ? { prompt: "none" } : S.me && !after?.pick ? {} : { prompt: "select_account" }) });
   saveNow();
@@ -708,7 +708,7 @@ function reauth(after){
     refreshToken().then(ok => {
       if (!ok) { S.refresh = ""; return reauth(after); }
       if (after?.do === "me") loadMe(); else if (after?.do === "subsync") syncSubsLight(true).then(() => refresh());
-      else if (after?.do === "sync") syncSubs(); else toast("Accesso rinnovato: riprova");
+      else if (after?.do === "sync") syncSubs(); else if (after?.do === "syncOn") { if ((S.grant || "").includes(DRIVE)) syncNow(true); else { S.refresh = ""; startLogin(after); } } else toast("Accesso rinnovato: riprova");
     });
     return;
   }
@@ -730,7 +730,7 @@ function readLoginReturn(){
   if (after.silent) S.silentFail = 0;
   if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return null; }
   if (isCode) return { ...after, code: h.get("code") };       // il codice si scambia col server di rinnovo all'avvio
-  S.token = h.get("access_token"); S.tokenScope = SCOPE;
+  S.token = h.get("access_token"); S.tokenScope = SCOPE; S.grant = h.get("scope") || "";
   S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
   return after;
 }
@@ -747,6 +747,112 @@ async function apiAuth(path, params, body){
   if (!r.ok) { const e = new Error(j.error?.message || ("Errore " + r.status)); e.reason = j.error?.errors?.[0]?.reason; throw e; }
   return j;
 }
+
+/* ---------- sincronizzazione tra dispositivi (Google Drive, cartella nascosta dell'app) ----------
+   Un solo file, ytg-sync.json, nella "appDataFolder" del tuo Drive: invisibile in Drive, solo YTG lo vede.
+   Dentro: le statistiche di ogni dispositivo (separate, così non si contano due volte), "riprendi da dove eri",
+   video aperti, Guarda più tardi e segnalibri (uniti; ciò che togli su un dispositivo sparisce anche sull'altro).
+   Usa l'API di Google Drive, non la quota di YouTube. */
+const DRIVE = "https://www.googleapis.com/auth/drive.appdata";
+const driveOk = () => tokenOk() && (S.grant || "").includes(DRIVE);
+const DAPI = "https://www.googleapis.com/drive/v3/files", DUP = "https://www.googleapis.com/upload/drive/v3/files";
+const SY = { busy: false, err: "", link: "" };
+if (!S.devId) S.devId = Math.random().toString(36).slice(2, 10);
+const devName = () => { const u = navigator.userAgent; return /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) ? "iPad" : /Android/.test(u) ? "Android" : /Windows/.test(u) ? "PC" : /Mac/.test(u) ? "Mac" : "Browser"; };
+async function drive(url, opt = {}){
+  if (S.refresh && !tokenOk()) await refreshToken();
+  const r = await fetch(url, { ...opt, headers: { Authorization: "Bearer " + S.token, ...(opt.headers || {}) } });
+  if (r.ok) return r;
+  const j = await r.json().catch(() => ({}));
+  const e = new Error(j.error?.message || "Errore " + r.status); e.status = r.status;
+  e.reason = j.error?.errors?.[0]?.reason || j.error?.details?.[0]?.reason || j.error?.status || "";
+  if (r.status === 401) e.relogin = true;
+  throw e;
+}
+function hashStr(t){ let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + ":" + t.length; }
+const localPart = () => JSON.stringify([S.stats, S.pos, S.watched, S.later, S.laterDel, S.marks, S.marksDel, S.clrW]);
+function mergeList(local, remote, key, del, ts){
+  const m = new Map();
+  for (const x of [...(remote || []), ...(local || [])]) { if (!x) continue; const k = key(x), o = m.get(k); if (!o || ts(x) >= ts(o)) m.set(k, x); }
+  return [...m.values()].filter(x => !((del || {})[key(x)] > ts(x)));
+}
+function applyRemote(r){
+  const now = Date.now(), old = 90 * 864e5;
+  const md = (a, b) => { const o = { ...(a || {}) }; for (const [k, t] of Object.entries(b || {})) if (!(o[k] >= t)) o[k] = t; for (const k in o) if (now - o[k] > old) delete o[k]; return o; };
+  S.laterDel = md(S.laterDel, r.laterDel); S.marksDel = md(S.marksDel, r.marksDel);
+  S.clrW = Math.max(S.clrW || 0, r.clrW || 0);
+  for (const [id, x] of Object.entries(r.pos || {})) if (x && (!S.pos[id] || (x.at || 0) > (S.pos[id].at || 0))) S.pos[id] = x;
+  const k = Object.keys(S.pos); if (k.length > 600) k.sort((a, b) => S.pos[a].at - S.pos[b].at).slice(0, k.length - 600).forEach(x => delete S.pos[x]);
+  for (const [id, t] of Object.entries(r.watched || {})) if (!(S.watched[id] >= t)) S.watched[id] = t;
+  if (S.clrW) for (const id in S.watched) if (S.watched[id] < S.clrW) delete S.watched[id];
+  S.later = mergeList(S.later, r.later, x => x.id, S.laterDel, x => x.savedAt || 0).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 5000);
+  S.marks = mergeList(S.marks, r.marks, markKey, S.marksDel, x => x.at || 0).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 500);
+  const P = {};
+  for (const [id, d] of Object.entries(r.devs || {})) if (id !== S.devId && d?.stats?.days && now - (d.at || 0) < 400 * 864e5) P[id] = d;
+  S.peers = P;
+}
+let syncing = null, syncT = 0;
+function syncNow(manual){ if (!syncing) syncing = doSync(manual).finally(() => { syncing = null; }); return syncing; }
+function syncSoon(){ if (S.opt.sync) { clearTimeout(syncT); syncT = setTimeout(() => syncNow(), 8000); } }
+async function doSync(manual){
+  if (!S.opt.sync || !bigReady) return;
+  if (!driveOk() && !(S.refresh && (S.grant || "").includes(DRIVE))) {
+    SY.err = "Per sincronizzare accedi di nuovo con Google e lascia la spunta su Google Drive."; SY.link = "";
+    if (manual) { if ((S.grant || "").includes(DRIVE)) reauth({ do: "syncOn", tab }); else startLogin({ do: "syncOn", tab }); }
+    return paintSync();
+  }
+  SY.busy = true; SY.err = ""; SY.link = ""; paintSync();
+  try {
+    let id = S.syncFile || "", meta = null;
+    if (id) { try { meta = await (await drive(`${DAPI}/${id}?fields=id,version`)).json(); } catch (e) { if (e.status !== 404) throw e; id = S.syncFile = ""; } }
+    if (!id) {
+      const l = await (await drive(`${DAPI}?spaces=appDataFolder&pageSize=10&fields=files(id,version)&q=${encodeURIComponent("name='ytg-sync.json'")}`)).json();
+      meta = l.files?.[0] || null; id = S.syncFile = meta?.id || "";
+    }
+    const before = hashStr(localPart());
+    let changed = false;
+    if (id && meta && String(meta.version) !== String(S.syncVer)) {
+      const r = await (await drive(`${DAPI}/${id}?alt=media`)).json().catch(() => null);
+      if (r && r.app === "YTG") { applyRemote(r); changed = true; }
+      S.syncVer = meta.version;
+    }
+    const localChanged = before !== S.syncHash;
+    if (!id || localChanged) {
+      const body = JSON.stringify({ app: "YTG", v: 1, at: Date.now(),
+        devs: { ...(S.peers || {}), [S.devId]: { name: devName(), at: Date.now(), stats: S.stats } },
+        pos: S.pos, watched: S.watched, later: S.later, laterDel: S.laterDel || {}, marks: S.marks, marksDel: S.marksDel || {}, clrW: S.clrW || 0 });
+      let res;
+      if (id) res = await (await drive(`${DUP}/${id}?uploadType=media&fields=id,version`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body })).json();
+      else {
+        const b = "ytg" + Math.random().toString(36).slice(2);
+        const mp = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: "ytg-sync.json", parents: ["appDataFolder"] })}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
+        res = await (await drive(`${DUP}?uploadType=multipart&fields=id,version`, { method: "POST", headers: { "Content-Type": "multipart/related; boundary=" + b }, body: mp })).json();
+        S.syncFile = res.id;
+      }
+      S.syncVer = res.version;
+    }
+    S.syncHash = hashStr(localPart()); S.syncAt = Date.now(); save();
+    if (changed) { if (tab === "vMe") renderMe(); else rerender(); }
+    if (manual) toast("Sincronizzato");
+  } catch (e) {
+    if (e.reason === "accessNotConfigured" || e.reason === "SERVICE_DISABLED" || /has not been used|is disabled/i.test(e.message)) {
+      SY.err = "Manca un passaggio: abilita l'API Google Drive nel tuo progetto Google Cloud (un clic), poi tocca Sincronizza ora.";
+      SY.link = "https://console.cloud.google.com/apis/library/drive.googleapis.com?project=" + encodeURIComponent((S.clientId || "").split("-")[0]);
+    } else if (e.relogin || /insufficient|SCOPE/i.test(e.reason)) {
+      if (!e.relogin) S.grant = (S.grant || "").replace(DRIVE, "");
+      SY.err = "Google non ha dato l'accesso a Drive: tocca Sincronizza ora e, nella schermata di Google, lascia la spunta su Google Drive.";
+    } else SY.err = "Sincronizzazione non riuscita: " + e.message;
+  } finally { SY.busy = false; paintSync(); }
+}
+function syncStatus(){
+  if (SY.busy) return "Sincronizzo…";
+  if (SY.err) return `<span style="color:var(--danger)">${esc(SY.err)}</span>${SY.link ? ` <a href="${esc(SY.link)}" target="_blank" rel="noopener" style="color:var(--fg);font-weight:600">Apri Google Cloud ›</a>` : ""}`;
+  const devs = [devName() + " (questo)"].concat(Object.values(S.peers || {}).map(d => d.name + " · " + ago(new Date(d.at).toISOString())));
+  return S.syncAt ? `Ultima sincronizzazione ${ago(new Date(S.syncAt).toISOString())}<br>Dispositivi: ${esc(devs.join(", "))}` : "Non ancora sincronizzato.";
+}
+function paintSync(){ const el = document.getElementById("syncSt"); if (el) el.innerHTML = syncStatus(); }
+setInterval(() => { if (S.opt.sync && !document.hidden) syncNow(); }, 3 * 60000);
+document.addEventListener("visibilitychange", () => { if (S.opt.sync && bigReady && (document.hidden || Date.now() - (S.syncAt || 0) > 60000)) syncNow(); });
 
 async function syncSubs(){
   if (!tokenOk()) return reauth({ do: "sync", force: true });
@@ -1927,7 +2033,7 @@ function themePicker(){
 }
 /* ---------- backup ----------
    Tutto quello che sta solo su questo telefono. Restano fuori l'accesso a Google (si rifà) e le cache che si riscaricano. */
-const BK_SKIP = new Set(["refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
+const BK_SKIP = new Set(["devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
 function exportBackup(){
   const data = {}; for (const k in S) if (!BK_SKIP.has(k)) data[k] = S[k];
   const now = new Date(), name = `YTG-backup-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.json`;
@@ -1962,6 +2068,12 @@ function renderSettings(){
       : `<span style="white-space:normal">Accedi con Google per caricare le tue iscrizioni, mettere Mi piace e commentare.</span><button class="btn" data-act="login">Accedi</button>`}
     </div>
     ${S.me ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="pickAccount">Cambia account<small>Scegli l'account Google e il canale con le tue iscrizioni</small></button>` : ""}
+    </div>
+
+    <h2 style="margin-top:22px">Sincronizzazione</h2>
+    <div class="panel">
+      <label class="toggle"><div>Sincronizza tra telefono e PC<small>Statistiche, Guarda più tardi, segnalibri, video visti e “riprendi da dove eri”. In un file nascosto del tuo Google Drive che vede solo YTG; non usa la quota di YouTube.</small></div><input type="checkbox" class="switch" id="o_sync" ${o.sync ? "checked" : ""}></label>
+      ${o.sync ? `<div class="list-item" style="border-top:1px solid var(--line);align-items:flex-start"><span id="syncSt" style="white-space:normal;font-size:13px;color:var(--muted);line-height:1.45">${syncStatus()}</span><button class="btn" data-act="syncNow" style="flex:none">Sincronizza ora</button></div>` : ""}
     </div>
 
     <h2 style="margin-top:22px">Tema</h2>
@@ -2219,10 +2331,30 @@ let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => { if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 15 * 60000) statSession(); });
 const fmtTime = s => { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min`; };
 /* --- calcoli --- */
+/* SV = statistiche da mostrare: quelle di questo dispositivo più quelle degli altri (se sincronizzi) */
+let SV = { days: {}, names: {} };
+function statsView(){
+  const peers = S.opt.sync ? Object.values(S.peers || {}).map(p => p.stats).filter(x => x?.days) : [];
+  if (!peers.length) return S.stats;
+  const out = { days: {}, names: {}, vid: {}, qs: {}, q: {}, v2: 0, devs: peers.length + 1 };
+  for (const st of [S.stats, ...peers]) {
+    for (const [k, e] of Object.entries(st.days || {})) {
+      const d = out.days[k] || (out.days[k] = { s: 0, ch: {} }); d.s += e.s || 0;
+      for (const f of ["ch", "h", "src"]) if (e[f]) { const t = d[f] || (d[f] = {}); for (const [x, v] of Object.entries(e[f])) t[x] = (t[x] || 0) + v; }
+      for (const f of ["o", "q", "a"]) if (e[f]) d[f] = (d[f] || 0) + e[f];
+    }
+    for (const [c, n] of Object.entries(st.names || {})) if (!out.names[c]) out.names[c] = n;
+    for (const [id, e] of Object.entries(st.vid || {})) { const o = out.vid[id] || (out.vid[id] = [0, 0]); o[0] += e[0]; o[1] = Math.max(o[1], e[1]); }
+    for (const [k, v] of Object.entries(st.qs || {})) out.qs[k] = (out.qs[k] || 0) + v;
+    for (const [k, v] of Object.entries(st.q || {})) out.q[k] = (out.q[k] || 0) + v;
+    if (st.v2) out.v2 = out.v2 ? Math.min(out.v2, st.v2) : st.v2;
+  }
+  return out;
+}
 const daysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return d; };
 function dayList(n, from = new Date()){ return Array.from({ length: n }, (_, i) => { const d = new Date(from); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - (n - 1 - i)); return d; }); }
 function statsAgg(n, from){
-  const D = S.stats.days, ds = dayList(n, from);
+  const D = SV.days, ds = dayList(n, from);
   const a = { s: 0, ch: {}, h: Array(24).fill(0), wd: Array(7).fill(0), src: {}, q: 0, o: 0, a: 0, active: 0, days: [] };
   for (const x of ds) {
     const e = D[dayKey(x)]; a.days.push({ d: x, s: e?.s || 0 }); if (!e) continue;
@@ -2234,10 +2366,10 @@ function statsAgg(n, from){
   }
   return a;
 }
-const firstStat = () => { const k = Object.keys(S.stats.days).sort()[0]; return k ? new Date(k + "T12:00") : null; };
+const firstStat = () => { const k = Object.keys(SV.days).sort()[0]; return k ? new Date(k + "T12:00") : null; };
 const daysSince = d => d ? Math.max(0, Math.round((new Date().setHours(12, 0, 0, 0) - new Date(d).setHours(12, 0, 0, 0)) / 864e5)) : 0;
 function streaks(){
-  const D = S.stats.days, on = d => (D[dayKey(d)]?.s || 0) >= 60;
+  const D = SV.days, on = d => (D[dayKey(d)]?.s || 0) >= 60;
   let cur = 0; const x = new Date(); if (!on(x)) x.setDate(x.getDate() - 1);
   while (on(x)) { cur++; x.setDate(x.getDate() - 1); }
   let best = 0, run = 0; const f = firstStat();
@@ -2266,7 +2398,7 @@ function barsHTML(b, h = 90){
   const mx = Math.max(...b.map(x => x.s), 60), gap = b.length > 14 ? 2 : b.length > 8 ? 5 : 8;
   return `<div class="sbars" style="height:${h}px;gap:${gap}px">${b.map(x => `<div class="sbar${x.hl ? " today" : ""}"${x.tip ? ` data-tip="${esc(x.tip)}"` : ""}><i style="height:${Math.max(2, x.s / mx * 100)}%"></i><span>${x.l || "&nbsp;"}</span></div>`).join("")}</div>`;
 }
-const chName = c => S.stats.names[c] || subMap().get(c)?.title || "";
+const chName = c => SV.names[c] || subMap().get(c)?.title || "";
 function chRows(list){
   const mx = list[0]?.[1] || 1;
   return list.map(([c, v]) => `<button class="stch" data-stch="${esc(c)}"><img src="${esc(avatarOf(c, chName(c)))}" alt=""><span class="n">${esc(chName(c))}</span><span class="b"><i style="width:${v / mx * 100}%"></i></span><span class="t">${fmtTime(v)}</span></button>`).join("");
@@ -2280,14 +2412,15 @@ function statVRow(x, sub){
 
 /* --- riquadro nel profilo --- */
 function statsHTML(){
-  if (!Object.keys(S.stats.days).length) return "";
+  SV = statsView();
+  if (!Object.keys(SV.days).length) return "";
   const a = statsAgg(7), p = statsAgg(7, daysAgo(7));
   const opened = Object.values(S.watched).filter(t => t > Date.now() - 7 * 864e5).length;
   const diff = p.s ? Math.round((a.s - p.s) / p.s * 100) : null;
   const top = Object.entries(statsAgg(30).ch).sort((x, y) => y[1] - x[1]).slice(0, 5);
   return `<div class="shead"><h3>Statistiche</h3><button class="more" data-act="meStats" style="font-size:13px">Tutte ›</button></div>
     <div class="panel stats" style="margin:0 16px 8px;padding:14px">
-      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:24px">${fmtTime(a.s)}</b><span class="sub">ultimi 7 giorni su questo dispositivo · ${opened} video aperti${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai 7 giorni prima` : ""}</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:24px">${fmtTime(a.s)}</b><span class="sub">ultimi 7 giorni ${SV.devs ? "su " + SV.devs + " dispositivi" : "su questo dispositivo"} · ${opened} video aperti${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai 7 giorni prima` : ""}</span></div>
       ${barsHTML(statBars(7, a))}
       ${top.length ? `<div class="sub" style="margin:14px 0 6px">Canali più guardati (30 giorni) · tocca per vedere i video</div>${chRows(top)}` : ""}
       <button class="more" data-act="meStats" style="margin-top:10px;font-size:13px">Vedi tutte le statistiche ›</button>
@@ -2297,6 +2430,7 @@ function statsHTML(){
 /* --- pagina "Statistiche" --- */
 const ST_PER = { 7: "7 giorni", 30: "30 giorni", 90: "90 giorni", 365: "1 anno" };
 function renderStatsPage(){
+  SV = statsView();
   const v = $("#vMe"), n = +S.opt.stPer || 30, a = statsAgg(n), prev = n < 365 ? statsAgg(n, daysAgo(n)) : null;
   const start = dayList(n)[0]; start.setHours(0, 0, 0, 0); const since = +start;
   const first = firstStat(), daysN = first ? Math.max(1, Math.min(n, daysSince(first) + 1)) : n;
@@ -2306,14 +2440,14 @@ function renderStatsPage(){
   const compl = pos.length ? Math.round(pos.reduce((t, x) => t + (x.done ? 1 : Math.min(1, x.t / (x.d || 1))), 0) / pos.length * 100) : null;
   const durs = pos.map(x => x.v.dur || x.d || 0).filter(Boolean), avgDur = durs.length ? durs.reduce((t, x) => t + x, 0) / durs.length : 0;
   const diff = prev?.s ? Math.round((a.s - prev.s) / prev.s * 100) : null;
-  const st = streaks(), v2 = S.stats.v2 || 0;
+  const st = streaks(), v2 = SV.v2 || 0;
   const chs = Object.entries(a.ch).filter(([, x]) => x >= 30).sort((x, y) => y[1] - x[1]);
   const html = [];
   html.push(`<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
       <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Statistiche</h2>
-      <div class="sub">Come usi YTG su questo dispositivo.</div></div>
+      <div class="sub">${SV.devs ? `Come usi YTG su ${SV.devs} dispositivi (sincronizzati).` : `Come usi YTG su questo dispositivo.${S.opt.sync ? "" : ` Per unire telefono e PC: Impostazioni → Sincronizzazione.`}`}</div></div>
     <div class="chips" style="padding:10px 16px 12px">${Object.entries(ST_PER).map(([k, l]) => `<button class="chip chipq${+k === n ? " on" : ""}" data-stper="${k}" style="padding:7px 13px">${l}</button>`).join("")}</div>`);
-  if (!Object.keys(S.stats.days).length) { v.innerHTML = html.join("") + `<div class="status" style="padding:8px 16px">Ancora niente: le statistiche si riempiono mentre guardi i video.</div>`; return; }
+  if (!Object.keys(SV.days).length) { v.innerHTML = html.join("") + `<div class="status" style="padding:8px 16px">Ancora niente: le statistiche si riempiono mentre guardi i video.</div>`; return; }
   html.push(`<div class="panel stp">
       <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:26px">${fmtTime(a.s)}</b><span class="sub">guardati in ${n === 365 ? "un anno" : n + " giorni"}${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai ${n} giorni prima` : ""}</span></div>
       ${barsHTML(statBars(n, a), 100)}
@@ -2361,14 +2495,14 @@ function renderStatsPage(){
       ${chs.length > 10 ? `<button class="more" data-act="stAllCh" style="margin-top:8px;font-size:13px">${ME.stAll ? "Mostra meno" : `Mostra tutti (${chs.length})`}</button>` : ""}</div>`);
 
   // video su cui hai passato più tempo
-  const V = S.stats.vid || {};
+  const V = SV.vid || {};
   const topV = Object.entries(V).filter(([, e]) => e[1] >= since && e[0] >= 60).sort((x, y) => y[1][0] - x[1][0]).slice(0, 5)
     .map(([id, e]) => ({ x: S.pos[id]?.v || CACHE.get(id), sec: e[0] })).filter(o => o.x);
   if (topV.length) html.push(`<div class="shead"><h3>Video su cui hai passato più tempo</h3></div>
     ${topV.map(o => statVRow(o.x, `${fmtTime(o.sec)} guardati · ${esc(o.x.chTitle || "")}`)).join("")}`);
 
   // ricerche più frequenti
-  const QS = Object.entries(S.stats.qs || {}).sort((x, y) => y[1] - x[1]).slice(0, 12);
+  const QS = Object.entries(SV.qs || {}).sort((x, y) => y[1] - x[1]).slice(0, 12);
   if (QS.length) html.push(`<div class="shead"><h3>Le tue ricerche più frequenti</h3></div>
     <div class="chips" style="flex-wrap:wrap">${QS.map(([q, x]) => `<button class="chip" data-q="${esc(q)}" style="padding:7px 13px;border:0;color:var(--fg);gap:6px">${esc(q)}${x > 1 ? `<span class="sub" style="font-size:12px">×${x}</span>` : ""}</button>`).join("")}</div>`);
 
@@ -2385,11 +2519,11 @@ function renderStatsPage(){
   }
 
   // quota
-  const Qd = S.stats.q || {}, qk = Object.keys(Qd).sort().slice(-Math.min(n, 120));
+  const Qd = SV.q || {}, qk = Object.keys(Qd).sort().slice(-Math.min(n, 120));
   if (qk.length) {
     const vals = qk.map(k => Qd[k]), avg = Math.round(vals.reduce((t, x) => t + x, 0) / vals.length), peakK = qk[vals.indexOf(Math.max(...vals))];
     html.push(`<div class="shead"><h3>Quota di YouTube</h3><span class="sub">10.000 unità al giorno</span></div>
-      <div class="panel stp"><div class="big">${(S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} unità oggi</div>
+      <div class="panel stp"><div class="big">${(SV.devs ? Qd[qDay()] || 0 : S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} unità oggi</div>
         <div class="stline" style="margin-top:4px">In media ${avg.toLocaleString("it-IT")} al giorno · il massimo ${Qd[peakK].toLocaleString("it-IT")} il ${fmtDay(peakK + "T12:00")}.</div></div>`);
   }
   if (v2 && v2 > since) html.push(`<div class="status" style="padding:10px 16px 24px">Orari, provenienza dei video, ricerche e aperture dell'app si contano dal ${fmtDay(v2)}.</div>`);
@@ -2399,14 +2533,15 @@ function renderStatsPage(){
 
 /* --- pagina di un canale nelle statistiche: i suoi video che hai guardato --- */
 function chanWatched(c){
-  const m = new Map(), V = S.stats.vid || {};
+  const m = new Map(), V = SV.vid || {};
   for (const p of Object.values(S.pos || {})) if (p.v?.ch === c) m.set(p.v.id, { x: p.v, at: p.at, done: p.done, t: p.t, d: p.d });
   for (const [id, at] of Object.entries(S.watched || {})) if (!m.has(id)) { const x = CACHE.get(id); if (x?.ch === c) m.set(id, { x, at, done: 0, t: 0, d: 0 }); }
   return [...m.values()].map(o => ({ ...o, w: V[o.x.id]?.[0] || 0 })).sort((a, b) => b.at - a.at);
 }
 function renderChanStats(){
+  SV = statsView();
   const v = $("#vMe"), c = ME.pl.ch, name = chName(c) || "Canale";
-  const D = S.stats.days, a30 = statsAgg(30);
+  const D = SV.days, a30 = statsAgg(30);
   let all = 0; for (const e of Object.values(D)) all += e.ch?.[c] || 0;
   const t30 = a30.ch[c] || 0, share = a30.s ? Math.round(t30 / a30.s * 100) : 0;
   const vids = chanWatched(c), done = vids.filter(o => o.done).length;
@@ -2810,7 +2945,7 @@ function addMark(){
   if (note === null) return;
   S.marks.unshift({ id: v.id, t, note: note.trim().slice(0, 200), at: Date.now(),
     v: { id: v.id, title: v.title, ch: v.ch, chTitle: v.chTitle, thumb: v.thumb, dur: v.dur, at: v.at, views: v.views || 0 } });
-  S.marks = S.marks.slice(0, 500); save(); paintMarks(); toast("Momento salvato a " + fmtDur(t));
+  S.marks = S.marks.slice(0, 500); save(); syncSoon(); paintMarks(); toast("Momento salvato a " + fmtDur(t));
 }
 function paintMarks(){
   const el = $("#vMarks"); if (!el || !current) return;
@@ -3039,8 +3174,8 @@ const inLater = id => S.later.some(v => v.id === id);
 function toggleLater(v, on){
   if (!v) return;
   if (on ?? !inLater(v.id)) { if (!inLater(v.id)) S.later.unshift({ ...v, desc: "", savedAt: Date.now() }); toast("Salvato in Guarda più tardi"); }
-  else { S.later = S.later.filter(x => x.id !== v.id); toast("Rimosso da Guarda più tardi"); }
-  S.later = S.later.slice(0, 5000); save();
+  else { S.later = S.later.filter(x => x.id !== v.id); (S.laterDel || (S.laterDel = {}))[v.id] = Date.now(); toast("Rimosso da Guarda più tardi"); }
+  S.later = S.later.slice(0, 5000); save(); syncSoon();
   if (tab === "vMe") renderMe();
 }
 
@@ -3625,7 +3760,8 @@ async function importLater(text){
     const det = new Map((await videoDetails(found.map(x => x.id))).filter(v => v.snippet).map(v => [v.id, v]));
     const now = Date.now();
     const add = found.filter(x => det.has(x.id)).map((x, i) => ({ ...toVideo(det.get(x.id)), desc: "", savedAt: x.at || now - i }));
-    S.later = S.later.concat(add).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 5000);
+    for (const x of add) if (S.laterDel) delete S.laterDel[x.id];
+    S.later = S.later.concat(add).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)).slice(0, 5000); syncSoon();
     remember(add); save();
     const miss = found.length - add.length;
     ME.laterMsg = `Importati ${add.length} video` + (miss ? ` · ${miss} non più disponibili (privati o eliminati)` : "") + ".";
@@ -3789,7 +3925,7 @@ document.addEventListener("click", e => {
   const mk = e.target.closest("[data-mark]");
   if (mk) return openMark(mk.dataset.mark);
   const um = e.target.closest("[data-unmark]");
-  if (um) { S.marks = S.marks.filter(m => markKey(m) !== um.dataset.unmark); save(); return renderMe(); }
+  if (um) { S.marks = S.marks.filter(m => markKey(m) !== um.dataset.unmark); (S.marksDel || (S.marksDel = {}))[um.dataset.unmark] = Date.now(); save(); syncSoon(); return renderMe(); }
   const ss = e.target.closest("[data-ssort]");
   if (ss) { S.opt.sSort = ss.dataset.ssort; save(); renderSearch(); return toTop(); }
   const sr = e.target.closest("[data-srange]");
@@ -3913,6 +4049,7 @@ document.addEventListener("click", e => {
   if (a === "laterPaste") return importLater($("#laterText")?.value || "");
   if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
+  if (a === "syncNow") return syncNow(true);
   if (a === "meBack") { ME.pl = ME.pl?.back || null; renderMe(); return toTop(); }
   if (a === "meStats") { if (tab !== "vMe") go("vMe"); ME.pl = { id: "stats", title: "Statistiche" }; ME.stAll = ME.stIdle = false; renderMe(); return toTop(); }
   if (a === "stAllCh") { ME.stAll = !ME.stAll; return renderMe(); }
@@ -3945,7 +4082,7 @@ document.addEventListener("click", e => {
     if (!d.hidden && current && statsFor !== current.id) { statsFor = current.id; refreshStats(current.id); }   // descrizione completa: 1 unità, solo se la apri
   }
   if (a === "clearTaste") { S.hist = []; S.blocked = {}; S.nope = []; S.hidden = {}; S.homeSeen = {}; S.homeFetch = 0; save(); toast("Gusti azzerati"); }
-  if (a === "clearSeen") { S.watched = {}; save(); toast("Video visti azzerati"); }
+  if (a === "clearSeen") { S.watched = {}; S.clrW = Date.now(); save(); syncSoon(); toast("Video visti azzerati"); }
   if (a === "reset") {
     if (!resetArmed) { resetArmed = true; t.textContent = "Tocca di nuovo per confermare"; setTimeout(() => { resetArmed = false; if (t.isConnected) t.textContent = "Cancella tutto"; }, 4000); return; }
     resetting = true; try { localStorage.removeItem(LS); } catch {}
@@ -4008,6 +4145,10 @@ document.addEventListener("change", e => {
   if (id === "o_prev") { S.opt.inlinePrev = e.target.checked; save(); if (!e.target.checked) stopPreview(); }
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
   if (id === "o_hsearch") { S.opt.homeSearch = e.target.checked; S.homeFetch = 0; save(); }
+  if (id === "o_sync") {
+    if (e.target.checked && !driveOk() && !(S.refresh && (S.grant || "").includes(DRIVE))) { e.target.checked = false; if (!S.clientId) return toast("Prima configura l'accesso con Google"); return startLogin({ do: "syncOn", tab }); }
+    S.opt.sync = e.target.checked; save(); renderSettings(); if (S.opt.sync) syncNow(true); return;
+  }
   if (id === "o_home") { S.opt.showHome = e.target.checked; save(); $("#navHome").hidden = !S.opt.showHome; }
   if (id === "o_region") { S.opt.region = e.target.value; S.homeFetch = 0; save(); }
   if (id === "o_n") { S.opt.perChannel = +e.target.value; save(); renderSettings(); }
@@ -4066,7 +4207,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102231609";
+const BUILD = "20261102232105";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
@@ -4111,7 +4252,7 @@ const after = readLoginReturn();
 if (after?.code) {
   try {
     const j = await authCall("/exchange", { code: after.code });
-    S.token = j.access_token; S.tokenScope = SCOPE; S.tokenExp = Date.now() + (+j.expires_in || 3600) * 1000;
+    S.token = j.access_token; S.tokenScope = SCOPE; S.grant = j.scope || ""; S.tokenExp = Date.now() + (+j.expires_in || 3600) * 1000;
     if (j.refresh_token) S.refresh = j.refresh_token;
     S.silentFail = 0; save();
     setTimeout(() => toast(S.refresh ? "Accesso permanente attivo" : "Accesso fatto, ma Google non ha dato l'accesso permanente: riprova da Impostazioni"), 600);
@@ -4131,6 +4272,10 @@ if (after?.do === "comment") {
   if (v) { CACHE.set(v.id, v); openVideo(v.id); }
   if (after.do === "sub") setTimeout(() => toggleSub(after.ch, after.title, after.thumb), 500);
   else if (v) setTimeout(() => { myRating = after.rating === "none" ? "like" : "none"; rate(after.rating === "none" ? "like" : after.rating); }, 500);
+} else if (after?.do === "syncOn") {
+  go("vSettings");
+  if ((S.grant || "").includes(DRIVE)) { S.opt.sync = true; save(); renderSettings(); syncNow(true); }
+  else { renderSettings(); SY.err = "Google non ha dato l'accesso a Drive: riprova e lascia la spunta su Google Drive."; paintSync(); }
 } else if (after?.do === "silentFailed") {
   const o = after.orig || {};
   go(o.tab || (o.do === "me" ? "vMe" : S.opt.showHome ? "vHome" : "vSubs"));
@@ -4147,6 +4292,7 @@ if (!after && S.me && subSyncDue(false)) {
   else if (Date.now() - (S.subSyncAt || 0) > 24 * 3600000 && (!S.silentFail || Date.now() - S.silentFail > 6 * 3600000)) setTimeout(() => reauth({ do: "subsync", tab }), 800);
 } else if (after && after.do !== "subsync" && tokenOk() && subSyncDue(false)) setTimeout(() => syncSubsLight(false), 1500);
 updateBell(); paintQuota(); setInterval(paintQuota, 60000); setTimeout(() => loadNotifs(), 2500);
+if (S.opt.sync && after?.do !== "syncOn") setTimeout(() => syncNow(), 2000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   loadNotifs();
