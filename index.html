@@ -2936,7 +2936,7 @@ function renderChannelHead(){
     <div class="chead"><img src="${esc(thumb)}" alt=""><div style="min-width:0;flex:1"><h2>${esc(s.title)}</h2><div class="sub">${esc(meta)}</div></div></div>
     <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button></div>
     ${s.description ? `<div class="cabout" id="cAbout">${esc(s.description)}</div><div style="padding:0 16px"><button class="more" data-act="chAbout">Altro</button></div>` : ""}
-    <div class="ctabs"><button data-ctab="videos" aria-current="${CH.tab === "videos"}">Video</button><button data-ctab="playlists" aria-current="${CH.tab === "playlists"}">Playlist</button></div>
+    <div class="ctabs"><button data-ctab="videos" aria-current="${CH.tab === "videos"}">Video</button><button data-ctab="live" aria-current="${CH.tab === "live"}">Live</button><button data-ctab="playlists" aria-current="${CH.tab === "playlists"}">Playlist</button></div>
     <form class="searchbar" id="chSearch" style="padding-top:10px"><input id="chQ" type="search" enterkeyhint="search" placeholder="Cerca nel canale" autocomplete="off"><button class="btn" type="submit">Cerca</button></form>
     <div id="chList"></div><div style="padding:4px 16px"><button class="more" id="chMoreBtn" data-act="chMore" hidden>Carica altri video</button></div>`;
 }
@@ -2992,12 +2992,34 @@ async function chanSearchAll(){
     list.innerHTML = `<div class="group">Risultati in tutto il canale${r.cached ? " · gratis" : ""}</div>` + (r.list.length ? r.list.map(rowHTML).join("") : `<div class="status" style="padding:8px 16px">Nessun video trovato.</div>`);
   } catch (e) { list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; }
 }
+/* dirette passate del canale: YouTube le tiene in una lista a parte (UULV), come la loro scheda "Live".
+   30 alla volta, circa 2 unità (lista + durate). */
+async function loadChanLives(first){
+  const id = CH.id, list = $("#chList"), btn = $("#chMoreBtn");
+  if (first) { CH.lives = null; CH.lpage = ""; list.innerHTML = `<div class="status" style="padding:12px 16px">Carico le dirette…</div>`; btn.hidden = true; }
+  try {
+    let j;
+    try { j = await api("playlistItems", { part: "snippet,contentDetails", playlistId: "UULV" + id.slice(2), maxResults: 30, ...(CH.lpage ? { pageToken: CH.lpage } : {}) }); }
+    catch (e) { if (e.reason === "quotaExceeded") throw e; j = { items: [] }; }        // nessuna lista = nessuna diretta
+    if (CH?.id !== id) return;
+    const vids = (await withDetails((j.items || []).map(fromPlaylistItem).filter(Boolean), false))
+      .sort((a, b) => b.at.localeCompare(a.at));
+    CH.lives = (first ? [] : CH.lives || []).concat(vids); CH.lpage = j.nextPageToken || "";
+    if (CH.tab !== "live") return;
+    list.innerHTML = CH.lives.length ? CH.lives.map(rowHTML).join("") : `<div class="status" style="padding:12px 16px">Questo canale non ha dirette passate.</div>`;
+    btn.hidden = !CH.lpage;
+  } catch (e) { if (CH?.id === id) list.innerHTML = `<div class="status err" style="padding:12px 16px">${esc(errMsg(e))}</div>`; }
+}
 async function chanTab(tabName){
   CH.tab = tabName;
   document.querySelectorAll(".ctabs button").forEach(b => b.setAttribute("aria-current", b.dataset.ctab === tabName));
   const list = $("#chList"), btn = $("#chMoreBtn");
   if ($("#chSearch")) $("#chSearch").hidden = tabName !== "videos";
   if (tabName === "videos") { if ($("#chQ")?.value) return chanFilter(); list.innerHTML = CH.vids.map(rowHTML).join(""); btn.hidden = !CH.page; return; }
+  if (tabName === "live") {
+    if (CH.lives) { list.innerHTML = CH.lives.length ? CH.lives.map(rowHTML).join("") : `<div class="status" style="padding:12px 16px">Questo canale non ha dirette passate.</div>`; btn.hidden = !CH.lpage; return; }
+    return loadChanLives(true);
+  }
   btn.hidden = true;
   if (!CH.playlists) {
     list.innerHTML = `<div class="status" style="padding:12px 16px">Carico le playlist…</div>`;
@@ -3498,7 +3520,7 @@ document.addEventListener("click", e => {
   if (a === "sync") syncSubs();
   if (a === "csv") $("#csvFile").click();
   if (a === "moreComments") loadComments(false);
-  if (a === "chMore") loadChanVideos(false);
+  if (a === "chMore") { if (CH?.tab === "live") loadChanLives(false); else loadChanVideos(false); }
   if (a === "chAbout") { $("#cAbout").classList.add("full"); t.remove(); }
   if (a === "subscribe") toggleSub();
   if (a === "vsub" && current) toggleSub(current.ch, current.chTitle, avatarOf(current.ch));
@@ -3695,7 +3717,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102164743";
+const BUILD = "20261102182453";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
