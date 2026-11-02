@@ -144,6 +144,7 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 :root[data-theme="neon"] .vprog i{background:#ff2bd6}
 :root[data-theme="term"] .vprog i{background:#41ff74}
 .chip.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.metag{font-size:10.5px;font-weight:600;background:var(--raised);color:var(--fg);border-radius:4px;padding:1px 5px;vertical-align:1px}
 .cmt.hl{background:var(--raised);border-radius:12px;box-shadow:0 0 0 6px var(--raised);animation:hlflash 1.6s ease 1}
 @keyframes hlflash{0%,30%{box-shadow:0 0 0 6px var(--accent)}100%{box-shadow:0 0 0 6px var(--raised)}}
 .sbars{display:flex;gap:8px;align-items:flex-end;height:90px;margin-top:14px}
@@ -488,6 +489,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
   <div style="padding:0 16px" class="comments">
     <form class="cform" id="cForm"><textarea id="cIn" rows="1" placeholder="Aggiungi un commento…"></textarea>
       <button class="btn" type="submit">Invia</button></form>
+    <div class="chips" id="cSort" style="padding:2px 0 6px"></div>
     <div id="cList"></div>
     <button class="more" id="cMore" data-act="moreComments" hidden>Carica altri commenti</button>
   </div>
@@ -2646,7 +2648,7 @@ async function searchRelated(){
 async function openThread(tid, cid){
   if (!current) return;
   const vid = current.id;
-  cLoadedFor = vid; cPage = "";
+  cLoadedFor = vid; cPage = ""; cFocusTid = tid;
   $("#cList").innerHTML = `<div id="cFocus"><div class="status">Carico la conversazione…</div></div><div class="group">Altri commenti</div><div id="cRest"><div class="status">Carico i commenti…</div></div>`;
   $("#cmTitle").textContent = "Commenti" + (current.comments ? " · " + num(current.comments) : "");
   openSheet("#cmts");
@@ -2847,36 +2849,77 @@ async function openYtLink(y){
   } catch (e) { toast(errMsg(e)); }
 }
 function commentHTML(c, replies){
-  const s = c.snippet;
-  return `<div class="cmt" data-cid="${esc(c.id || "")}"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
-    <div><b>${esc(s.authorDisplayName)}</b> <span class="sub">· ${ago(s.publishedAt)}${s.updatedAt !== s.publishedAt ? " (modificato)" : ""}</span>
+  const s = c.snippet, me = myId() && s.authorChannelId?.value === myId();
+  return `<div class="cmt${me ? " mine" : ""}" data-cid="${esc(c.id || "")}"><img class="avatar" loading="lazy" src="${esc(s.authorProfileImageUrl)}" alt="">
+    <div><b>${esc(s.authorDisplayName)}</b>${me ? ` <span class="metag">Tu</span>` : ""} <span class="sub">· ${ago(s.publishedAt)}${s.updatedAt !== s.publishedAt ? " (modificato)" : ""}</span>
       <p>${linkify(s.textOriginal ?? s.textDisplay, true)}</p>
       <div class="sub">${s.likeCount ? "♥ " + s.likeCount : ""}</div>
       ${replies || ""}</div></div>`;
 }
 
+/* ordine dei commenti (Più rilevanti / Più recenti) e i tuoi commenti sempre in cima */
+const myId = () => S.myChId || S.meData?.chan?.id || "";
+let cMine = new Set(), cFocusTid = "";      // conversazioni già mostrate in cima (per non ripeterle sotto)
+const MINE_HEAD = `<div class="group" style="padding-left:0">I tuoi commenti</div>`, OTHER_HEAD = `<div class="group cOther" style="padding-left:0">Altri commenti</div>`;
+function paintCSort(){
+  const o = S.opt.cOrder || "relevance", el = $("#cSort"); if (!el) return;
+  el.innerHTML = `<button class="chip chipq${o === "relevance" ? " on" : ""}" data-corder="relevance" style="padding:7px 13px">Più rilevanti</button>
+    <button class="chip chipq${o === "time" ? " on" : ""}" data-corder="time" style="padding:7px 13px">Più recenti</button>`;
+}
+function isMineThread(t){
+  const me = myId(); if (!me) return false;
+  return t.snippet.topLevelComment.snippet.authorChannelId?.value === me || (t.replies?.comments || []).some(r => r.snippet.authorChannelId?.value === me);
+}
+function threadHTML(t, open){
+  const top = t.snippet.topLevelComment, n = t.snippet.totalReplyCount || 0;
+  const shown = open ? (t.replies?.comments || []).slice().sort((a, b) => a.snippet.publishedAt.localeCompare(b.snippet.publishedAt)) : [];
+  const rep = !n ? "" : shown.length >= n ? `<div class="replies" id="r_${t.id}">${shown.map(c => commentHTML(c)).join("")}</div>`
+    : `<div class="replies" id="r_${t.id}">${shown.map(c => commentHTML(c)).join("")}<button class="more" data-replies="${t.id}">Mostra ${shown.length ? "tutte le " + n + " risposte" : n + " rispost" + (n === 1 ? "a" : "e")}</button></div>`;
+  return commentHTML(top, rep);
+}
+function addMine(html){                  // aggiunge in fondo alla sezione "I tuoi commenti"
+  const m = $("#cMine"); if (!m) return false;
+  if (!m.firstElementChild) m.innerHTML = MINE_HEAD + OTHER_HEAD;
+  m.querySelector(".cOther").insertAdjacentHTML("beforebegin", html);
+  return true;
+}
+async function loadMineThreads(vid){
+  const ids = (S.myComments || []).filter(c => c.v === vid).map(c => c.id).slice(0, 20);
+  if (!ids.length) return [];
+  try { return (await api("commentThreads", { part: "snippet,replies", id: ids.join(","), textFormat: "plainText" })).items || []; } catch { return []; }
+}
 async function loadComments(first){
-  const vid = current.id, list = $("#cRest") || $("#cList"), moreBtn = $("#cMore");
+  const vid = current.id, list = $("#cRest") || $("#cList"), moreBtn = $("#cMore"), order = S.opt.cOrder || "relevance";
+  paintCSort();
   try {
-    const j = await api("commentThreads", { part: "snippet,replies", videoId: vid, maxResults: 20, order: "relevance", textFormat: "plainText", ...(cPage ? { pageToken: cPage } : {}) });
+    const [j, mineKnown] = await Promise.all([
+      api("commentThreads", { part: "snippet,replies", videoId: vid, maxResults: 20, order, textFormat: "plainText", ...(cPage ? { pageToken: cPage } : {}) }),
+      first && !$("#cFocus") ? loadMineThreads(vid) : Promise.resolve([])
+    ]);
     if (current?.id !== vid) return;
-    const meId = S.myChId || S.meData?.chan?.id;
-    if (meId) for (const t of j.items || []) {
-      const mineTop = t.snippet.topLevelComment.snippet.authorChannelId?.value === meId;
-      const mineReply = (t.replies?.comments || []).some(r => r.snippet.authorChannelId?.value === meId);
-      if (mineTop || mineReply) followThread(t.id, vid);
+    const focus = !!$("#cFocus");                  // aperti da una notifica: la conversazione è già in cima
+    if (first) cMine = new Set(focus ? [cFocusTid] : []);
+    const mineNew = [], others = [];
+    for (const t of mineKnown) if (!cMine.has(t.id)) { cMine.add(t.id); mineNew.push(t); }
+    for (const t of j.items || []) {
+      const mine = isMineThread(t);
+      if (mine) followThread(t.id, vid);
+      if (cMine.has(t.id)) continue;
+      cMine.add(t.id);
+      (mine && !focus ? mineNew : others).push(t);
     }
-    const html = (j.items || []).map(t => {
-      const top = t.snippet.topLevelComment, n = t.snippet.totalReplyCount;
-      const rep = n ? `<div class="replies" id="r_${t.id}"><button class="more" data-replies="${t.id}">Mostra ${n} rispost${n === 1 ? "a" : "e"}</button></div>` : "";
-      return commentHTML(top, rep);
-    }).join("");
+    const mineHTML = mineNew.map(t => threadHTML(t, true)).join(""), html = others.map(t => threadHTML(t, false)).join("");
     if (first) {
-      list.innerHTML = html || `<div class="status">Ancora nessun commento.</div>`;
-      const top = j.items?.[0]?.snippet?.topLevelComment?.snippet;
-      $("#cPrev").innerHTML = top ? `<img src="${esc(top.authorProfileImageUrl)}" alt=""><div>${esc(top.textOriginal ?? top.textDisplay)}</div>` : `<div class="sub">Ancora nessun commento. Scrivi il primo.</div>`;
+      list.innerHTML = (focus ? "" : `<div id="cMine">${mineHTML ? MINE_HEAD + mineHTML + OTHER_HEAD : ""}</div>`)
+        + (html || (mineHTML ? `<div class="status">Nessun altro commento.</div>` : `<div class="status">Ancora nessun commento.</div>`));
+      if (order === "relevance" && !$("#cFocus")) {
+        const top = j.items?.[0]?.snippet?.topLevelComment?.snippet;
+        $("#cPrev").innerHTML = top ? `<img src="${esc(top.authorProfileImageUrl)}" alt=""><div>${esc(top.textOriginal ?? top.textDisplay)}</div>` : `<div class="sub">Ancora nessun commento. Scrivi il primo.</div>`;
+      }
+    } else {
+      list.insertAdjacentHTML("beforeend", html);
+      if (mineHTML) addMine(mineHTML);
     }
-    else list.insertAdjacentHTML("beforeend", html);
     cPage = j.nextPageToken || ""; moreBtn.hidden = !cPage;
   } catch (e) {
     if (current?.id !== vid) return;
@@ -2909,9 +2952,16 @@ async function postComment(video, text){
     if (s?.authorChannelId?.value && !S.myChId) S.myChId = s.authorChannelId.value;
     if (s && current?.id === video.id) {
       $("#cIn").value = "";
-      const list = $("#cList"); if (list.querySelector(".status")) list.innerHTML = "";
-      list.insertAdjacentHTML("afterbegin", commentHTML({ snippet: { ...s, authorDisplayName: s.authorDisplayName || S.me?.title || "Tu",
-        authorProfileImageUrl: s.authorProfileImageUrl || S.me?.thumb || "", publishedAt: s.publishedAt || new Date().toISOString(), updatedAt: s.publishedAt } }));
+      const me = myId() || s.authorChannelId?.value || "";
+      const html = commentHTML({ id: j.id, snippet: { ...s, authorChannelId: { value: me }, authorDisplayName: s.authorDisplayName || S.me?.title || "Tu",
+        authorProfileImageUrl: s.authorProfileImageUrl || S.me?.thumb || "", publishedAt: s.publishedAt || new Date().toISOString(), updatedAt: s.publishedAt } });
+      if (j.id) cMine.add(j.id);
+      const m = $("#cMine");
+      if (m) {                                   // in cima, prima degli altri tuoi commenti
+        if (!m.firstElementChild) m.innerHTML = MINE_HEAD + OTHER_HEAD;
+        m.firstElementChild.insertAdjacentHTML("afterend", html);
+        m.parentElement.querySelectorAll(":scope > .status").forEach(x => x.remove());
+      } else { const list = $("#cList"); if (list.querySelector(".status")) list.innerHTML = ""; list.insertAdjacentHTML("afterbegin", html); }
     }
     toast("Commento pubblicato");
   } catch (e) {
@@ -3484,6 +3534,8 @@ document.addEventListener("click", e => {
   if (hq) { const q = hq.dataset.hq; $("#sIn").value = q; sFocus = false; $("#sIn").blur(); return doSearch(q); }
   const hx = e.target.closest("[data-hx]");
   if (hx) { S.sHist = (S.sHist || []).filter(x => x !== hx.dataset.hx); save(); $("#sIn")?.focus(); return renderSearch(); }
+  const co = e.target.closest("[data-corder]");
+  if (co) { if ((S.opt.cOrder || "relevance") !== co.dataset.corder) { S.opt.cOrder = co.dataset.corder; save(); cPage = ""; $("#cList").innerHTML = `<div class="status">Carico i commenti…</div>`; loadComments(true); } return; }
   const yl = e.target.closest("a[data-yt]");
   if (yl) { e.preventDefault(); try { openYtLink(JSON.parse(yl.dataset.yt)); } catch {} return; }
   const sk = e.target.closest("[data-seek]");
@@ -3734,7 +3786,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102182743";
+const BUILD = "20261102183928";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
