@@ -884,13 +884,29 @@ async function videoDetails(ids){
   return pages.flatMap(p => p?.items || []);
 }
 
-/* Iscrizioni: playlist "UULF" = solo video normali (niente Shorts). Se manca, "UU" + filtro durata. */
+/* Iscrizioni: playlist "UULF" = solo video normali (niente Shorts), più "UULV" = le dirette (anche concluse).
+   Se UULF manca, "UU" (tutto, dirette comprese) + filtro durata.
+   I canali che non hanno mai fatto dirette vengono ricordati (S.noLV) e ricontrollati solo ogni 30 giorni: così le dirette costano 1 unità in più solo per chi le fa. */
+async function channelLives(ch, n){
+  const t = S.noLV?.[ch.id];
+  if (t && Date.now() - t < 30 * 864e5) return [];
+  try {
+    const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULV" + ch.id.slice(2), maxResults: Math.min(n, 5) });
+    const ids = (j.items || []).map(i => i.contentDetails.videoId);
+    if (!ids.length) (S.noLV || (S.noLV = {}))[ch.id] = Date.now(); else if (S.noLV) delete S.noLV[ch.id];
+    return ids;
+  } catch (e) {
+    if (e.reason === "quotaExceeded") throw e;
+    (S.noLV || (S.noLV = {}))[ch.id] = Date.now();               // nessuna lista di dirette: canale senza live
+    return [];
+  }
+}
 async function channelUploads(ch){
   const tail = ch.id.slice(2), n = S.opt.perChannel;
   if (!S.noLF[ch.id]) {
     try {
-      const j = await api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: n });
-      return { ids: (j.items || []).map(i => i.contentDetails.videoId), strict: true };
+      const [j, lv] = await Promise.all([api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: n }), channelLives(ch, n)]);
+      return { ids: [...new Set((j.items || []).map(i => i.contentDetails.videoId).concat(lv))], strict: true };
     } catch (e) {
       if (e.reason === "quotaExceeded" || /API key|referer|keyInvalid/i.test(e.message)) throw e;
       S.noLF[ch.id] = 1;
@@ -953,6 +969,7 @@ async function syncSubsLight(manual){
 const subSyncDue = manual => Date.now() - (S.subSyncAt || 0) > (manual ? 5 * 60000 : 3 * 3600000);
 async function refresh(manual, full){
   if (busy) return;
+  if (!S.livesV && S.channels.length && S.key) { full = true; S.livesV = 1; }      // una volta sola: rileggo tutti i canali per aggiungere le dirette passate
   if (!S.key) { if (manual) { toast("Aggiungi prima la chiave API"); go("vSettings"); } return; }
   if (S.me && subSyncDue(manual)) {
     if (tokenOk()) await syncSubsLight(manual);
@@ -3717,7 +3734,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102182453";
+const BUILD = "20261102182743";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
