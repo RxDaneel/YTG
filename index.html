@@ -2287,7 +2287,7 @@ function statsHTML(){
   const top = Object.entries(statsAgg(30).ch).sort((x, y) => y[1] - x[1]).slice(0, 5);
   return `<div class="shead"><h3>Statistiche</h3><button class="more" data-act="meStats" style="font-size:13px">Tutte ›</button></div>
     <div class="panel stats" style="margin:0 16px 8px;padding:14px">
-      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:24px">${fmtTime(a.s)}</b><span class="sub">ultimi 7 giorni · ${opened} video aperti${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai 7 giorni prima` : ""}</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:24px">${fmtTime(a.s)}</b><span class="sub">ultimi 7 giorni su questo dispositivo · ${opened} video aperti${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai 7 giorni prima` : ""}</span></div>
       ${barsHTML(statBars(7, a))}
       ${top.length ? `<div class="sub" style="margin:14px 0 6px">Canali più guardati (30 giorni) · tocca per vedere i video</div>${chRows(top)}` : ""}
       <button class="more" data-act="meStats" style="margin-top:10px;font-size:13px">Vedi tutte le statistiche ›</button>
@@ -4066,7 +4066,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102231311";
+const BUILD = "20261102231609";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
