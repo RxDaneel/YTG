@@ -389,8 +389,10 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 /* player di YouTube con i suoi comandi: la barra di YTG e lo strato per mostrarla sono nascosti */
 #pCtl,.reveal{display:none!important}
 /* schermo intero di YTG: resta dentro l'app, così iOS non apre il suo lettore (con la sua seconda barra del volume) */
-.full #player.open .pwrap{position:fixed;left:0;top:0;width:var(--vw,100vw);height:var(--vh,100vh);overflow:hidden;background:#000}
-.full #player.open .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none;transform:none}
+/* il riquadro occupa esattamente lo schermo (niente misure calcolate) e il video è un 16:9 centrato da YTG,
+   così non può finire spostato da un lato */
+.full #player.open .pwrap{position:fixed;inset:0;width:auto;height:auto;overflow:hidden;background:#000;z-index:5}
+html.full #player.open #pFrame{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(100%,calc(100dvh * 16 / 9));height:auto;aspect-ratio:16/9;max-width:none}
 #pFullX{display:none}
 .full #player.open #pFullX{display:grid;place-items:center;position:absolute;z-index:6;left:calc(env(safe-area-inset-left,0px) + 10px);top:calc(env(safe-area-inset-top,0px) + 10px);
   width:38px;height:38px;border-radius:50%;border:0;background:rgba(0,0,0,.5);opacity:.75}
@@ -3716,7 +3718,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102164141";
+const BUILD = "20261102164544";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
