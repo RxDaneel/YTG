@@ -2245,7 +2245,7 @@ function renderSettings(){
       <form class="field" id="authForm" style="margin-top:10px"><input id="authIn" placeholder="https://ytg-auth.tuonome.workers.dev" value="${esc(S.authServer || "")}" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="btn" type="submit">${S.refresh && authSrv() ? "Salva" : "Attiva"}</button></form>
       ${S.refresh && authSrv() ? "" : `<button class="more" data-act="authPaste" style="padding:10px 0 0">Incolla l'indirizzo dagli appunti e attiva</button>`}
-      ${S.refresh ? `<button class="more" data-act="authOff" style="padding:10px 0 0">Disattiva l'accesso permanente</button>` : ""}
+      ${S.refresh ? `<div style="display:flex;gap:18px;flex-wrap:wrap"><button class="more" data-act="authTest" style="padding:10px 0 0">Prova il rinnovo adesso</button><button class="more" data-act="authOff" style="padding:10px 0 0">Disattiva l'accesso permanente</button></div>` : ""}
     </div>
 
     <h2 style="margin-top:22px">Backup</h2>
@@ -4204,6 +4204,14 @@ document.addEventListener("click", e => {
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
   if (a === "bkExport") return exportBackup();
+  if (a === "authTest") {                        // chiede subito a Google un nuovo accesso tramite il server di rinnovo
+    toast("Provo il rinnovo…");
+    authCall("/refresh", { refresh_token: S.refresh }).then(j => {
+      S.token = j.access_token; S.tokenScope = SCOPE; if (j.scope) S.grant = j.scope; S.tokenExp = Date.now() + (+j.expires_in || 3600) * 1000; save();
+      toast("Funziona: accesso rinnovato da Google");
+    }, e => toast(e.code === "invalid_client" ? "Google rifiuta il client secret salvato in Cloudflare (disattivato o sbagliato)" : e.code === "invalid_grant" ? "Accesso revocato: premi di nuovo Attiva" : "Il rinnovo non funziona: " + e.message));
+    return;
+  }
   if (a === "authPaste") {
     if (!navigator.clipboard?.readText) return toast("Incolla l'indirizzo nel campo");
     navigator.clipboard.readText().then(t => {
@@ -4404,7 +4412,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261103100526";
+const BUILD = "20261103101725";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
