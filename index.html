@@ -695,6 +695,7 @@ function startLogin(after){
   if (!S.clientId) { toast("Prima inserisci l'ID client in Impostazioni"); closeSheets(); go("vSettings"); return; }
   const state = Math.random().toString(36).slice(2);
   try { sessionStorage.setItem("ytg.state", state); sessionStorage.setItem("ytg.after", JSON.stringify(after || { do: "sync" })); } catch {}
+  S.oauthState = state;                      // copia di riserva: il ritorno da Google è valido solo se porta questo codice
   const code = !!authSrv() && !after?.silent;
   const p = new URLSearchParams({ client_id: S.clientId, redirect_uri: redirectUri(), response_type: code ? "code" : "token",
     scope: SCOPE + (S.opt.sync || after?.do === "syncOn" ? " " + DRIVE : ""), include_granted_scopes: "true", state,
@@ -733,7 +734,8 @@ function readLoginReturn(){
     setTimeout(() => toast("Accesso annullato"), 300); return null;
   }
   if (after.silent) S.silentFail = 0;
-  if (st && h.get("state") !== st) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return null; }
+  const want = st || S.oauthState || ""; S.oauthState = ""; save();
+  if (!want || h.get("state") !== want) { setTimeout(() => toast("Accesso non valido, riprova"), 300); return null; }   // protegge da accessi "iniettati" da un link
   if (isCode) return { ...after, code: h.get("code") };       // il codice si scambia col server di rinnovo all'avvio
   S.token = h.get("access_token"); S.tokenScope = SCOPE; S.grant = h.get("scope") || "";
   S.tokenExp = Date.now() + (+h.get("expires_in") || 3600) * 1000; save();
@@ -1853,7 +1855,7 @@ function searchToolbar(){
     <button class="chip chipq${sort === "recent" ? " on" : ""}" data-ssort="recent" style="padding:7px 13px">Più recenti</button>
     <button class="chip chipq${sort === "rel" ? " on" : ""}" data-ssort="rel" style="padding:7px 13px">Più pertinenti</button>
     <span style="width:1px;background:var(--line);margin:4px 2px;flex:none"></span>
-    ${Object.entries(RANGES).map(([k, n]) => `<button class="chip chipq${sRange === k ? " on" : ""}" data-srange="${k}" style="padding:7px 13px">${n}</button>`).join("")}</div>`;
+    ${Object.entries(RANGES).map(([k, n]) => `<button class="chip chipq${sRange === k ? " on" : ""}" data-srange="${esc(k)}" style="padding:7px 13px">${n}</button>`).join("")}</div>`;
 }
 function doSearch(q, noFix){
   q = (q || "").trim(); if (!q) return;
@@ -1920,11 +1922,11 @@ function progBar(id){
 }
 function card(x, menu){
   const bits = [esc(x.chTitle), x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ");
-  if (menu === true) return `<div class="cwrap">${card(x)}<button class="cdots" data-cm="${x.id}" aria-label="Altre azioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button></div>`;
-  return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${x.id}">
+  if (menu === true) return `<div class="cwrap">${card(x)}<button class="cdots" data-cm="${esc(x.id)}" aria-label="Altre azioni"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button></div>`;
+  return `<button class="card${S.watched[x.id] ? " seen" : ""}" data-v="${esc(x.id)}">
     <div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
       ${x.live ? `<span class="dur live">IN DIRETTA</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}${progBar(x.id)}</div>
-    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="${esc(x.chTitle)}" data-ch="${x.ch}">
+    <div class="meta"><img class="avatar" loading="lazy" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="${esc(x.chTitle)}" data-ch="${esc(x.ch)}">
       <div><div class="title">${esc(x.title)}</div><div class="sub">${bits}</div></div></div>
   </button>`;
 }
@@ -1987,7 +1989,7 @@ function renderGroupEditor(){
       <input class="tin" id="grpQ" placeholder="Cerca tra i tuoi canali" autocomplete="off" autocorrect="off">
       <div class="sub" id="grpCount" style="margin-top:8px">${GE.ids.size} canali scelti</div></div>
     <div id="grpList">${chs.map(c => `<label class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="">
-      <span>${esc(c.title)}</span><input type="checkbox" data-gch="${c.id}" ${GE.ids.has(c.id) ? "checked" : ""}></label>`).join("")}</div>
+      <span>${esc(c.title)}</span><input type="checkbox" data-gch="${esc(c.id)}" ${GE.ids.has(c.id) ? "checked" : ""}></label>`).join("")}</div>
     <div class="grpbar">${GE.orig ? `<button class="btn ghost" data-act="grpDel" style="margin-right:auto">Elimina</button>` : ""}
       <button class="btn" data-act="grpSave">Salva</button></div>`;
   $("#grpName").oninput = e => GE.name = e.target.value;
@@ -2128,8 +2130,8 @@ function renderChannels(status, isErr){
     ${status ? `<div class="status${isErr ? " err" : ""}">${esc(status)}</div>` : ""}
     <h2 style="margin-top:22px">I tuoi canali · ${S.channels.length}</h2>
     <div class="panel">${sorted.length ? sorted.map(c => `<div class="list-item">
-      <img class="avatar" loading="lazy" src="${esc(c.thumb)}" alt="" data-ch="${c.id}"><span data-ch="${c.id}">${esc(c.title)}</span>
-      <button class="x" data-del="${c.id}">Rimuovi</button></div>`).join("") : `<div class="status" style="padding:14px">Ancora nessun canale.</div>`}</div>
+      <img class="avatar" loading="lazy" src="${esc(c.thumb)}" alt="" data-ch="${esc(c.id)}"><span data-ch="${esc(c.id)}">${esc(c.title)}</span>
+      <button class="x" data-del="${esc(c.id)}">Rimuovi</button></div>`).join("") : `<div class="status" style="padding:14px">Ancora nessun canale.</div>`}</div>
   </div>`;
 }
 
@@ -2157,12 +2159,12 @@ function applyCols(){
 applyCols();
 function themePicker(){
   const cur = S.opt.theme;
-  return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${k}" aria-pressed="${k === cur}">
+  return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${esc(k)}" aria-pressed="${k === cur}">
     <span class="sw" style="background:${t.bg}"><i style="background:${t.ac}"></i></span>${t.name}</button>`).join("")}</div></div>`;
 }
 /* ---------- backup ----------
    Tutto quello che sta solo su questo telefono. Restano fuori l'accesso a Google (si rifà) e le cache che si riscaricano. */
-const BK_SKIP = new Set(["imp", "devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
+const BK_SKIP = new Set(["authServer", "oauthState", "__proto__", "constructor", "prototype", "imp", "devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
 function exportBackup(){
   const data = {}; for (const k in S) if (!BK_SKIP.has(k)) data[k] = S[k];
   const now = new Date(), name = `YTG-backup-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.json`;
@@ -2181,7 +2183,7 @@ function importBackup(text){
   if (b?.app !== "YTG" || !b.data || typeof b.data !== "object") return toast("Questo file non è un backup di YTG");
   const when = b.at ? new Date(b.at).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" }) : "";
   if (!confirm(`Ripristinare il backup${when ? " del " + when : ""}? I dati di YTG su questo telefono verranno sostituiti.`)) return;
-  for (const k in b.data) if (!BK_SKIP.has(k)) S[k] = b.data[k];
+  for (const k of Object.keys(b.data)) if (!BK_SKIP.has(k)) S[k] = b.data[k];
   S.opt = Object.assign({}, DEF_OPT, S.opt || {});
   S.homeFetch = 0; saveNow(); applyTheme(S.opt.theme); applyCols();
   toast("Backup ripristinato"); setTimeout(() => location.reload(), 1500);
@@ -2210,7 +2212,7 @@ function renderSettings(){
     <div class="deskonly">
       <h2 style="margin-top:22px">Video per riga</h2>
       <div class="panel" style="padding:14px"><div class="chips" style="padding:0;flex-wrap:wrap">${[[0, "Automatico"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"]].map(([k, l]) =>
-        `<button class="chip chipq${(o.cols ?? 4) === k ? " on" : ""}" data-cols="${k}" style="padding:7px 16px">${l}</button>`).join("")}</div>
+        `<button class="chip chipq${(o.cols ?? 4) === k ? " on" : ""}" data-cols="${esc(k)}" style="padding:7px 16px">${l}</button>`).join("")}</div>
         <div class="sub" style="margin-top:10px">Solo su schermi grandi (PC): Home, Iscrizioni e Ricerca. Automatico mette tutti quelli che stanno nella finestra.</div></div>
     </div>
     <h2 style="margin-top:22px">Contenuti</h2>
@@ -2220,9 +2222,9 @@ function renderSettings(){
       <label class="toggle"><div>Home sui tuoi interessi<small>Cerca video sui temi delle tue iscrizioni. Circa 100 unità quando la aggiorni; spenta usa le classifiche di YouTube (0–3 unità).</small></div><input type="checkbox" class="switch" id="o_hsearch" ${o.homeSearch ? "checked" : ""}></label>
       ${S.mutedTopics.length ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="unmuteAll">Temi tolti dalla Home: ${esc(S.mutedTopics.join(", "))}<small>Tocca per rimetterli tutti</small></button>` : ""}
       <label class="toggle"><div>Paese della Home e della ricerca</div>
-        <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${k}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${esc(k)}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
-        <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${k}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${esc(k)}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
       <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
@@ -2355,7 +2357,7 @@ async function loadNotifs(force){
 function renderNotifs(){
   const list = S.notifs || [], seen = S.nSeenShown || 0;
   const loggedOut = !S.myChId && !S.meData?.chan && !(S.myComments || []).length;
-  $("#nList").innerHTML = followBox() + (list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${n.v}" data-nt="${esc(n.tid || String(n.id || "").split(".")[0])}" data-nc="${esc(n.id || "")}">
+  $("#nList").innerHTML = followBox() + (list.length ? list.map(n => `<button class="notif${Date.parse(n.at) > seen ? " new" : ""}" data-nv="${esc(n.v)}" data-nt="${esc(n.tid || String(n.id || "").split(".")[0])}" data-nc="${esc(n.id || "")}">
       <img class="avatar" loading="lazy" src="${esc(n.pic)}" alt="" style="width:36px;height:36px">
       <div style="flex:1"><div class="title" style="font-size:13.5px;-webkit-line-clamp:3"><b>${esc(n.who)}</b> ${n.k === "r" ? "ha risposto al tuo commento" : "ha commentato"} su “${esc(n.vt)}”: ${esc(n.text)}</div>
         <div class="sub">${ago(n.at)}</div></div>
@@ -2575,7 +2577,7 @@ function renderStatsPage(){
   html.push(`<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
       <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Statistiche</h2>
       <div class="sub">${SV.devs ? `Come usi YTG su ${SV.devs} dispositivi (sincronizzati).` : `Come usi YTG su questo dispositivo.${S.opt.sync ? "" : ` Per unire telefono e PC: Impostazioni → Sincronizzazione.`}`}</div></div>
-    <div class="chips" style="padding:10px 16px 12px">${Object.entries(ST_PER).map(([k, l]) => `<button class="chip chipq${+k === n ? " on" : ""}" data-stper="${k}" style="padding:7px 13px">${l}</button>`).join("")}</div>`);
+    <div class="chips" style="padding:10px 16px 12px">${Object.entries(ST_PER).map(([k, l]) => `<button class="chip chipq${+k === n ? " on" : ""}" data-stper="${esc(k)}" style="padding:7px 13px">${l}</button>`).join("")}</div>`);
   if (!Object.keys(SV.days).length) { v.innerHTML = html.join("") + `<div class="status" style="padding:8px 16px">Ancora niente: le statistiche si riempiono mentre guardi i video.</div>`; return; }
   html.push(`<div class="panel stp">
       <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><b style="font-size:26px">${fmtTime(a.s)}</b><span class="sub">guardati in ${n === 365 ? "un anno" : n + " giorni"}${diff !== null ? ` · ${diff >= 0 ? "+" : ""}${diff}% rispetto ai ${n} giorni prima` : ""}</span></div>
@@ -3068,14 +3070,14 @@ function renderWatch(){
   const x = current;
   $("#pInfo").innerHTML = `
     <h2 class="vt">${esc(x.title)}</h2>
-    <div class="vmeta"><b data-ch="${x.ch}">${esc(x.chTitle)}</b>
+    <div class="vmeta"><b data-ch="${esc(x.ch)}">${esc(x.chTitle)}</b>
       <span id="vLikes">${x.likes ? num(x.likes) + " Mi piace" : ""}</span>
       <span>${x.views ? views(x.views) : ""}</span><span>${ago(x.at)}</span>
       <button class="more" data-act="desc">…altro</button></div>
     <div class="vdesc" id="vDesc" hidden><b>${x.views ? x.views.toLocaleString("it-IT") + " visualizzazioni" : ""}</b> · ${new Date(x.at).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
       <div class="d">${x.desc ? linkify(x.desc, true) : "Nessuna descrizione."}</div></div>
     <div class="vact">
-      <img class="avatar" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="" data-ch="${x.ch}">
+      <img class="avatar" src="${esc(avatarOf(x.ch, x.chTitle))}" alt="" data-ch="${esc(x.ch)}">
       <button class="pill${isSub(x.ch) ? " on" : ""}" id="vSub" data-act="vsub">${isSub(x.ch) ? "Iscritto" : "Iscriviti"}</button>
       <span class="sp"></span>
       <button class="rbtn" id="rLike" data-act="like" aria-label="Mi piace">${ICON.like}</button>
@@ -3124,7 +3126,7 @@ function paintMarks(){
   const el = $("#vMarks"); if (!el || !current) return;
   const ms = S.marks.filter(m => m.id === current.id).sort((a, b) => a.t - b.t);
   el.innerHTML = ms.length ? `<div class="group" style="padding-top:2px">I tuoi segnalibri</div><div class="chaps">${ms.map(m =>
-    `<button class="chap" data-seek="${m.t}"><span class="ct">${fmtDur(m.t)}</span><span class="cn">${esc(m.note || "Segnalibro")}</span></button>`).join("")}</div>` : "";
+    `<button class="chap" data-seek="${esc(m.t)}"><span class="ct">${fmtDur(m.t)}</span><span class="cn">${esc(m.note || "Segnalibro")}</span></button>`).join("")}</div>` : "";
 }
 function openMark(key){
   const m = S.marks.find(x => markKey(x) === key); if (!m) return;
@@ -3153,7 +3155,7 @@ function paintChapters(id){
   const el = $("#vChap"), ch = S.chap[id]; chapNow = -1;
   if (!el || current?.id !== id) return;
   el.innerHTML = ch?.length ? `<div class="group" style="padding-top:2px">Capitoli</div><div class="chaps" id="chapRow">${ch.map(([t, n], i) =>
-    `<button class="chap" data-seek="${t}" data-ci="${i}"><span class="ct">${fmtDur(t)}</span><span class="cn">${esc(n)}</span></button>`).join("")}</div>` : "";
+    `<button class="chap" data-seek="${esc(t)}" data-ci="${esc(i)}"><span class="ct">${fmtDur(t)}</span><span class="cn">${esc(n)}</span></button>`).join("")}</div>` : "";
 }
 function chapTick(t){
   const ch = current && S.chap[current.id]; if (!ch?.length) return;
@@ -3161,7 +3163,7 @@ function chapTick(t){
   if (i === chapNow) return; chapNow = i;
   const row = $("#chapRow"); if (!row) return;
   row.querySelectorAll(".chap").forEach(b => b.classList.toggle("on", +b.dataset.ci === i));
-  const b = row.querySelector(`[data-ci="${i}"]`); if (b) row.scrollTo({ left: b.offsetLeft - 16, behavior: "smooth" });
+  const b = row.querySelector(`[data-ci="${esc(i)}"]`); if (b) row.scrollTo({ left: b.offsetLeft - 16, behavior: "smooth" });
 }
 function loadChapters(id){
   if (S.chap[id]) return paintChapters(id);
@@ -3339,7 +3341,7 @@ async function ccMenu(){
 
 function showMenu(items){
   closeMenu();
-  document.body.insertAdjacentHTML("beforeend", `<div class="scrim" data-act="closeMenu"></div><div class="menu">${items.map(([a, label]) => `<button data-act="${a}">${label}</button>`).join("")}</div>`);
+  document.body.insertAdjacentHTML("beforeend", `<div class="scrim" data-act="closeMenu"></div><div class="menu">${items.map(([a, label]) => `<button data-act="${esc(a)}">${label}</button>`).join("")}</div>`);
 }
 function closeMenu(){ document.querySelectorAll(".menu,.scrim").forEach(n => n.remove()); }
 /* Guarda più tardi: una playlist che vive solo in YTG, su questo telefono (YouTube non la rende accessibile alle app esterne) */
@@ -3449,7 +3451,7 @@ function threadHTML(t, open){
   const top = t.snippet.topLevelComment, n = t.snippet.totalReplyCount || 0;
   const shown = open ? (t.replies?.comments || []).slice().sort((a, b) => a.snippet.publishedAt.localeCompare(b.snippet.publishedAt)) : [];
   const rep = !n ? "" : shown.length >= n ? `<div class="replies" id="r_${t.id}">${shown.map(c => commentHTML(c)).join("")}</div>`
-    : `<div class="replies" id="r_${t.id}">${shown.map(c => commentHTML(c)).join("")}<button class="more" data-replies="${t.id}">Mostra ${shown.length ? "tutte le " + n + " risposte" : n + " rispost" + (n === 1 ? "a" : "e")}</button></div>`;
+    : `<div class="replies" id="r_${t.id}">${shown.map(c => commentHTML(c)).join("")}<button class="more" data-replies="${esc(t.id)}">Mostra ${shown.length ? "tutte le " + n + " risposte" : n + " rispost" + (n === 1 ? "a" : "e")}</button></div>`;
   return commentHTML(top, rep);
 }
 function addMine(html){                  // aggiunge in fondo alla sezione "I tuoi commenti"
@@ -3584,7 +3586,7 @@ function renderChannelHead(){
 }
 
 function rowHTML(x){
-  return `<button class="row" data-v="${x.id}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
+  return `<button class="row" data-v="${esc(x.id)}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
     ${x.live ? `<span class="dur live">LIVE</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}${progBar(x.id)}</div>
     <div style="min-width:0"><div class="title">${esc(x.title)}</div><div class="sub">${[x.views ? views(x.views) : "", ago(x.at)].filter(Boolean).join(" · ")}</div></div></button>`;
 }
@@ -3673,7 +3675,7 @@ async function chanTab(tabName){
   if (CH.tab !== "playlists") return;
   list.innerHTML = CH.playlists.length ? CH.playlists.map(p => {
     const t = p.snippet.thumbnails || {};
-    return `<button class="row" data-pl="${p.id}" data-plt="${esc(p.snippet.title)}"><div class="thumb"><img loading="lazy" src="${esc((t.medium || t.default || {}).url || "")}" alt="">
+    return `<button class="row" data-pl="${esc(p.id)}" data-plt="${esc(p.snippet.title)}"><div class="thumb"><img loading="lazy" src="${esc((t.medium || t.default || {}).url || "")}" alt="">
       <span class="dur">${p.contentDetails.itemCount} video</span></div>
       <div style="min-width:0"><div class="title">${esc(p.snippet.title)}</div><div class="sub">Playlist</div></div></button>`;
   }).join("") : `<div class="status" style="padding:12px 16px">Questo canale non ha playlist pubbliche.</div>`;
@@ -3819,7 +3821,7 @@ async function loadMe(manual){
 }
 
 function hcard(x){
-  return `<button class="hcard" data-v="${x.id}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
+  return `<button class="hcard" data-v="${esc(x.id)}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
     ${x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}${progBar(x.id)}</div>
     <div class="title">${esc(x.title)}</div><div class="sub">${esc(x.chTitle)}</div></button>`;
 }
@@ -3836,7 +3838,7 @@ function renderMe(){
   const head = d?.chan
     ? `<div class="mehead"><img src="${esc(d.chan.thumb)}" alt=""><div style="min-width:0"><h2>${esc(d.chan.title)}</h2>
         <div class="sub">${[d.chan.handle, d.chan.subs ? subs(d.chan.subs) : "", d.chan.n ? d.chan.n + " video" : ""].filter(Boolean).map(esc).join(" · ")}</div>
-        ${d.chan.id ? `<button class="more" data-ch="${d.chan.id}">Vai al tuo canale ›</button>` : ""}</div></div>`
+        ${d.chan.id ? `<button class="more" data-ch="${esc(d.chan.id)}">Vai al tuo canale ›</button>` : ""}</div></div>`
     : `<div class="mehead"><div style="min-width:0"><h2>${esc(S.me?.title || "Il tuo profilo")}</h2></div></div>`;
   const loginCard = !S.clientId
     ? `<div class="panel" style="margin:4px 16px 8px;padding:14px"><div class="help" style="padding:0">Configura l'accesso con Google nelle impostazioni per vedere qui le tue playlist di YouTube, i video piaciuti e i tuoi video.</div>
@@ -3870,7 +3872,7 @@ function renderMe(){
     ${d ? `<button class="row" data-act="meLiked"><div class="thumb" style="display:grid;place-items:center;background:var(--raised)">
         <svg viewBox="0 0 24 24" width="30" height="30" style="stroke:var(--fg);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm0 0 4-7a2.5 2.5 0 0 1 2.6 3L13 10h6a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 21H7"/></svg></div>
         <div style="min-width:0"><div class="title">Video piaciuti</div><div class="sub">${d.liked.length} video${d.likedShorts ? ` · ${d.likedShorts} Shorts esclusi` : ""}</div></div></button>
-      ${d.playlists.map(p => `<button class="row" data-mypl="${p.id}"><div class="thumb"><img loading="lazy" src="${esc(p.thumb)}" alt=""><span class="dur">${p.n} video</span></div>
+      ${d.playlists.map(p => `<button class="row" data-mypl="${esc(p.id)}"><div class="thumb"><img loading="lazy" src="${esc(p.thumb)}" alt=""><span class="dur">${p.n} video</span></div>
         <div style="min-width:0"><div class="title">${esc(p.title)}</div><div class="sub">Playlist</div></div></button>`).join("")
         || `<div class="status" style="padding:4px 16px">Non hai playlist.</div>`}
 
@@ -3960,9 +3962,9 @@ function renderSubsManager(){
       <button class="chip chipq${SM.sort === "az" ? " on" : ""}" data-smsort="az" style="padding:7px 13px">A–Z</button>
       <button class="chip chipq${SM.sort === "old" ? " on" : ""}" data-smsort="old" style="padding:7px 13px">Fermi da più tempo</button>
       <button class="chip chipq" data-act="smAll" style="padding:7px 13px">${list.length && list.every(c => SM.sel.has(c.id)) ? "Deseleziona" : "Seleziona"} tutti</button></div>
-    <div id="smList">${list.map(c => `<div class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="" data-ch="${c.id}">
-      <span data-ch="${c.id}" style="cursor:pointer">${esc(c.title)} <b style="color:var(--muted);font-weight:500">›</b><small style="display:block;color:var(--muted);font-size:12px">${last[c.id] ? "ultimo video " + ago(last[c.id]) : "nessun video recente"}</small></span>
-      <label style="display:grid;place-items:center;width:48px;height:48px;margin:-8px -12px -8px 0"><input type="checkbox" data-smch="${c.id}" ${SM.sel.has(c.id) ? "checked" : ""} aria-label="Scegli ${esc(c.title)}"></label></div>`).join("") || `<div class="status" style="padding:12px 16px">Nessun canale.</div>`}</div>
+    <div id="smList">${list.map(c => `<div class="grow" data-gname="${esc(c.title.toLowerCase())}"><img loading="lazy" src="${esc(avatarOf(c.id, c.title))}" alt="" data-ch="${esc(c.id)}">
+      <span data-ch="${esc(c.id)}" style="cursor:pointer">${esc(c.title)} <b style="color:var(--muted);font-weight:500">›</b><small style="display:block;color:var(--muted);font-size:12px">${last[c.id] ? "ultimo video " + ago(last[c.id]) : "nessun video recente"}</small></span>
+      <label style="display:grid;place-items:center;width:48px;height:48px;margin:-8px -12px -8px 0"><input type="checkbox" data-smch="${esc(c.id)}" ${SM.sel.has(c.id) ? "checked" : ""} aria-label="Scegli ${esc(c.title)}"></label></div>`).join("") || `<div class="status" style="padding:12px 16px">Nessun canale.</div>`}</div>
     <div class="grpbar"><span class="sub" style="margin-right:auto;align-self:center">${n ? `${n} scelt${n === 1 ? "o" : "i"} · ${n * 50} unità` : "Nessuno scelto"}</span>
       <button class="btn" data-act="smGo" ${!n || SM.busy ? "disabled" : ""} style="background:var(--danger);color:#fff">${SM.busy ? "Attendi…" : "Disiscriviti"}</button></div>`;
   const qi = $("#smQ"); qi.oninput = () => { SM.q = qi.value; const k = normTxt(SM.q); v.querySelectorAll("#smList .grow").forEach(r => r.hidden = k && !normTxt(r.dataset.gname).includes(k)); };
@@ -4032,7 +4034,7 @@ function renderMyPlaylist(){
         <button class="btn ghost" data-act="laterImp" style="margin-top:10px;font-size:13px;padding:8px 14px">Importa da YouTube</button></div>
       ${ME.laterImp ? laterImportPanel() : ""}
       ${S.later.length ? S.later.slice(0, ME.laterShow || 60).map(x => `<div style="display:flex;align-items:center">${rowHTML(x).replace('class="row"', 'class="row" style="flex:1;min-width:0"')}
-          <button class="rbtn" data-unlater="${x.id}" aria-label="Rimuovi" style="margin-right:8px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("")
+          <button class="rbtn" data-unlater="${esc(x.id)}" aria-label="Rimuovi" style="margin-right:8px"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("")
           + (S.later.length > (ME.laterShow || 60) ? `<div style="padding:8px 16px 20px;text-align:center"><button class="btn ghost" data-act="laterMore" style="font-size:13px;padding:8px 14px">Mostra altri (${S.later.length - (ME.laterShow || 60)})</button></div>` : "")
         : `<div class="status" style="padding:12px 16px">Ancora nessun video.</div>`}`;
     return;
@@ -4394,7 +4396,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261103093825";
+const BUILD = "20261103095159";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
