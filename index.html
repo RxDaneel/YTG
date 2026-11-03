@@ -2274,7 +2274,7 @@ function renderSettings(){
     <div class="status">${S.lastFetch ? "Iscrizioni aggiornate " + ago(new Date(S.lastFetch).toISOString()) : ""}</div>
     <h2 style="margin-top:22px">Diagnostica</h2>
     <div class="panel" style="padding:12px 14px"><div class="help" style="padding:0;font-variant-numeric:tabular-nums;line-height:1.7">
-      Versione ${esc(BUILD)} · ${idb ? "memoria completa" : "memoria ridotta"}<br>
+      Versione ${esc(BUILD)} · ${idb ? "memoria completa" : "memoria ridotta"} · <a href="privacy.html" target="_blank" rel="noopener" style="color:inherit">Privacy</a><br>
       Schermo: ${innerHeight} · ${Math.round(window.visualViewport?.height || 0)} · ${Math.max(screen.width, screen.height)} · app ${Math.round(document.body.getBoundingClientRect().height)} · margine sotto ${Math.round(parseFloat(getComputedStyle($("nav")).paddingBottom))}<br>
       Account: ${esc(S.me?.title || "nessuno")}${S.myChId ? " (canale ok)" : ""} · accesso ${tokenOk() ? "attivo" : "scaduto"}<br>
       Chiave: …${esc((S.key || "").slice(-4))} · ID client: …${esc((S.clientId || "").split("-")[0].slice(-4))}<br>
@@ -4359,7 +4359,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261102233751";
+const BUILD = "20261103092238";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
