@@ -714,7 +714,7 @@ function reauth(after){
     refreshToken().then(ok => {
       if (!ok) { S.refresh = ""; return reauth(after); }
       if (after?.do === "me") loadMe(); else if (after?.do === "subsync") syncSubsLight(true).then(() => refresh());
-      else if (after?.do === "sync") syncSubs(); else if (after?.do === "syncOn") { if ((S.grant || "").includes(DRIVE)) syncNow(true); else { S.refresh = ""; startLogin(after); } } else toast("Accesso rinnovato: riprova");
+      else if (after?.do === "sync") syncSubs(); else if (after?.do === "syncOn") { if ((S.grant || "").includes(DRIVE)) syncNow(true); else startLogin(after); } else toast("Accesso rinnovato: riprova");
     });
     return;
   }
@@ -839,7 +839,7 @@ async function doSync(manual){
       S.syncVer = res.version;
     }
     S.syncHash = hashStr(localPart()); S.syncAt = Date.now(); save();
-    if (changed) { if (tab === "vMe") renderMe(); else rerender(); }
+    if (changed || (tab === "vMe" && ME.pl?.id === "stats")) { if (tab === "vMe") renderMe(); else rerender(); }
     if (manual) toast("Sincronizzato");
   } catch (e) {
     if (e.reason === "accessNotConfigured" || e.reason === "SERVICE_DISABLED" || /has not been used|is disabled/i.test(e.message)) {
@@ -2576,7 +2576,10 @@ function renderStatsPage(){
   const html = [];
   html.push(`<div style="padding:10px 16px 4px"><button class="more" data-act="meBack">‹ Tu</button>
       <h2 style="font:700 20px/1.25 var(--font);margin:4px 0 0">Statistiche</h2>
-      <div class="sub">${SV.devs ? `Come usi YTG su ${SV.devs} dispositivi (sincronizzati).` : `Come usi YTG su questo dispositivo.${S.opt.sync ? "" : ` Per unire telefono e PC: Impostazioni → Sincronizzazione.`}`}</div></div>
+      <div class="sub">${SV.devs ? `Come usi YTG su ${SV.devs} dispositivi: ${esc([devName() + " (questo)"].concat(Object.values(S.peers || {}).map(d => d.name)).join(", "))}${S.syncAt ? ` · sincronizzate ${ago(new Date(S.syncAt).toISOString())}` : ""}.` : "Come usi YTG su questo dispositivo."}</div>
+      ${!S.opt.sync ? `<div class="panel" style="margin-top:10px;padding:12px 14px;display:flex;gap:12px;align-items:center"><div class="sub" style="flex:1">Qui vedi solo questo dispositivo. Attiva la sincronizzazione qui e sull'altro dispositivo per unire telefono e PC.</div><button class="btn" data-act="syncStart" style="flex:none;font-size:13px;padding:8px 14px">Attiva</button></div>`
+        : SY.err ? `<div class="sub" style="margin-top:8px;color:var(--danger)">${esc(SY.err)}</div>`
+        : !SV.devs ? `<div class="sub" style="margin-top:8px">Sincronizzazione attiva${S.syncAt ? ` (ultima ${ago(new Date(S.syncAt).toISOString())})` : ""}, ma dall'altro dispositivo non è ancora arrivato niente: apri YTG anche lì e attiva la sincronizzazione in Impostazioni.</div>` : ""}</div>
     <div class="chips" style="padding:10px 16px 12px">${Object.entries(ST_PER).map(([k, l]) => `<button class="chip chipq${+k === n ? " on" : ""}" data-stper="${esc(k)}" style="padding:7px 13px">${l}</button>`).join("")}</div>`);
   if (!Object.keys(SV.days).length) { v.innerHTML = html.join("") + `<div class="status" style="padding:8px 16px">Ancora niente: le statistiche si riempiono mentre guardi i video.</div>`; return; }
   html.push(`<div class="panel stp">
@@ -4239,6 +4242,11 @@ document.addEventListener("click", e => {
   if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
   if (a === "syncNow") return syncNow(true);
+  if (a === "syncStart") {
+    if (!S.clientId) return toast("Prima configura l'accesso con Google");
+    if (!driveOk() && !(S.refresh && (S.grant || "").includes(DRIVE))) return startLogin({ do: "syncOn", tab });
+    S.opt.sync = true; save(); syncNow(true).then(() => renderMe()); return renderMe();
+  }
   if (a === "meBack") { ME.pl = ME.pl?.back || null; renderMe(); return toTop(); }
   if (a === "meStats") { if (tab !== "vMe") go("vMe"); ME.pl = { id: "stats", title: "Statistiche" }; ME.stAll = ME.stIdle = false; renderMe(); return toTop(); }
   if (a === "stAllCh") { ME.stAll = !ME.stAll; return renderMe(); }
@@ -4396,7 +4404,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261103095159";
+const BUILD = "20261103100526";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
