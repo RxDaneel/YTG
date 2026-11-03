@@ -62,7 +62,9 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);font:15px/1.4 var(--font)}
 /* la pagina non scorre mai: scorre solo <main>. Così su iPhone le barre non possono "staccarsi" (succedeva dopo tastiera o rotazione) */
-body{display:flex;flex-direction:column;position:fixed;top:0;left:0;right:0;height:var(--appH,100%)}
+body{display:flex;flex-direction:column;position:fixed;top:var(--appTop,0px);left:0;right:0;height:var(--appH,100%)}
+/* scrivendo in un campo dentro la pagina (es. Impostazioni) l'app segue lo spazio sopra la tastiera e la barra in basso si nasconde */
+.kbd nav{display:none}
 button,input,select,textarea{font:inherit;color:inherit}
 /* niente zoom: iPhone ingrandisce la pagina se un campo di testo ha caratteri sotto i 16px */
 html{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -2240,6 +2242,7 @@ function renderSettings(){
       <div class="help" style="padding:0">${S.refresh && authSrv() ? "Attivo: YTG rinnova da solo l'accesso a Google, non dovrai più rifarlo." : "Google dà alle app web un accesso di un'ora. Con il tuo server di rinnovo (Cloudflare Worker, gratis) resti collegato. Incolla qui il suo indirizzo, poi tocca Attiva."}</div>
       <form class="field" id="authForm" style="margin-top:10px"><input id="authIn" placeholder="https://ytg-auth.tuonome.workers.dev" value="${esc(S.authServer || "")}" autocapitalize="off" autocorrect="off" spellcheck="false">
         <button class="btn" type="submit">${S.refresh && authSrv() ? "Salva" : "Attiva"}</button></form>
+      ${S.refresh && authSrv() ? "" : `<button class="more" data-act="authPaste" style="padding:10px 0 0">Incolla l'indirizzo dagli appunti e attiva</button>`}
       ${S.refresh ? `<button class="more" data-act="authOff" style="padding:10px 0 0">Disattiva l'accesso permanente</button>` : ""}
     </div>
 
@@ -2808,8 +2811,31 @@ function tryFullscreen(){
 }
 /* Su iPhone, aperta dalla schermata Home, l'app occupa tutto lo schermo: uso l'altezza vera dello schermo,
    così la barra in basso arriva sempre fino al fondo. Con la tastiera aperta seguo lo spazio visibile. */
+/* iPhone, tastiera aperta su un campo dentro la pagina: iOS sposta la vista verso l'alto per mostrare il campo,
+   ma l'app è fissa e restava "tagliata" (barra a metà schermo, nero sotto). Qui l'app segue esattamente lo spazio visibile
+   sopra la tastiera e il campo viene portato in vista scorrendo la pagina, senza toccare lo scorrimento di iOS. */
+let kbdRAF = 0;
+function kbdFix(){
+  cancelAnimationFrame(kbdRAF);
+  kbdRAF = requestAnimationFrame(() => {
+    const el = document.activeElement, vv = window.visualViewport, root = document.documentElement;
+    const inMain = !!(el?.matches?.("input,textarea") && el.closest("main"));
+    root.classList.toggle("kbd", inMain);
+    if (!vv || !inMain) { if (root.style.getPropertyValue("--appTop")) { root.style.removeProperty("--appTop"); fitApp(); } return; }
+    root.style.setProperty("--appTop", Math.max(0, Math.round(vv.offsetTop)) + "px");
+    root.style.setProperty("--appH", Math.round(vv.height) + "px");
+    const m = document.querySelector("main"), r = el.getBoundingClientRect(), mr = m.getBoundingClientRect();
+    if (r.bottom > mr.bottom - 16) m.scrollTop += r.bottom - mr.bottom + 40;
+    else if (r.top < mr.top + 8) m.scrollTop -= mr.top - r.top + 40;
+  });
+}
+window.visualViewport?.addEventListener("resize", kbdFix);
+window.visualViewport?.addEventListener("scroll", kbdFix);
+document.addEventListener("focusin", () => { kbdFix(); setTimeout(kbdFix, 350); });
+document.addEventListener("focusout", () => setTimeout(kbdFix, 200));
 function fitApp(){
   const root = document.documentElement, vv = window.visualViewport;
+  if (root.classList.contains("kbd")) return kbdFix();
   const portrait = matchMedia("(orientation: portrait)").matches;
   const scr = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   const standalone = navigator.standalone || matchMedia("(display-mode: standalone)").matches;
@@ -4173,6 +4199,15 @@ document.addEventListener("click", e => {
   if (a === "unlaterCur") { closeMenu(); return toggleLater(current, false); }
   if (a === "meLater") return openMyPlaylist("later");
   if (a === "bkExport") return exportBackup();
+  if (a === "authPaste") {
+    if (!navigator.clipboard?.readText) return toast("Incolla l'indirizzo nel campo");
+    navigator.clipboard.readText().then(t => {
+      const u = (String(t).match(/https:\/\/[^\s"'<>]+/) || [""])[0].replace(/\/+$/, "");
+      if (!u) return toast("Negli appunti non c'è un indirizzo https://");
+      $("#authIn").value = u; $("#authForm").requestSubmit();
+    }, () => toast("Non riesco a leggere gli appunti: incolla l'indirizzo nel campo"));
+    return;
+  }
   if (a === "authOff") { S.refresh = ""; save(); toast("Accesso permanente disattivato"); return renderSettings(); }
   if (a === "mark") return addMark();
   if (a === "chSearchAll") return chanSearchAll();
@@ -4359,7 +4394,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261103092238";
+const BUILD = "20261103093825";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
