@@ -2895,7 +2895,8 @@ async function toggleFull(){
 function safeFit(on){
   const m = document.querySelector('meta[name="viewport"]'); if (!m) return;
   if (!m.dataset.orig) m.dataset.orig = m.content;
-  m.content = on ? m.dataset.orig.replace(/,\s*viewport-fit=cover/, "") : m.dataset.orig;
+  // togliere viewport-fit=cover centra il video ma riaccende la Dynamic Island: resta com'è e il video si centra compensando (fitFrame)
+  m.content = m.dataset.orig;
   document.documentElement.style.background = on ? "#000" : "";
   [100, 400, 900].forEach(t => setTimeout(fitFrame, t));
 }
@@ -4576,7 +4577,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104230551";
+const BUILD = "20261104230841";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
