@@ -2777,7 +2777,7 @@ function renderChanStats(){
     ${vids.length ? vids.map(o => statVRow(o.x, sub(o))).join("") : `<div class="status" style="padding:4px 16px">Nessun video di questo canale nella tua cronologia di YTG.</div>`}
     <div style="height:24px"></div>`;
 }
-function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; document.documentElement.classList.remove("full", "pfs"); $("#pFrame").removeAttribute("style"); }
+function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; if (document.documentElement.classList.contains("pfs")) safeFit(false); document.documentElement.classList.remove("full", "pfs"); $("#pFrame").removeAttribute("style"); }
 
 /* ---------- controlli del player ---------- */
 const CI = {
@@ -2878,10 +2878,10 @@ function inFull(){ return !!fsEl() || document.documentElement.classList.contain
 async function toggleFull(){
   const root = document.documentElement, w = $("#pWrap");
   if (fsEl()) { root.classList.remove("pfs"); try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch {} return; }
-  if (root.classList.contains("pfs")) { root.classList.remove("pfs"); fitFrame(); paintCtl(); return; }
+  if (root.classList.contains("pfs")) { root.classList.remove("pfs"); safeFit(false); fitFrame(); paintCtl(); return; }
   let ok = false;
   if (apiFs(w)) { try { const p = w.requestFullscreen ? w.requestFullscreen({ navigationUI: "hide" }) : w.webkitRequestFullscreen(); if (p?.then) await p; else await new Promise(r => setTimeout(r, 400)); ok = !!fsEl(); } catch {} }
-  if (!ok) { root.classList.add("pfs"); fitFrame(); }
+  if (!ok) { root.classList.add("pfs"); safeFit(true); fitFrame(); }
   fsLand = matchMedia("(orientation: landscape)").matches;
   w.classList.add("fsfresh"); setTimeout(() => w.classList.remove("fsfresh"), 3000);   // la ✕ si vede bene per 3 secondi, poi resta tenue
   paintCtl();
@@ -2889,6 +2889,16 @@ async function toggleFull(){
 /* Schermo intero dentro l'app: il riquadro del video ha esattamente le proporzioni 16:9 ed è centrato nella zona sicura
    (fuori dalla Dynamic Island). Così il lettore YouTube non deve aggiungere bande nere e non può spostare il video.
    Le misure si ricalcolano quando giri il telefono e si comunicano al lettore (setSize), che altrimenti a volte resta con quelle vecchie. */
+/* Il lettore YouTube, su iPhone in orizzontale, sposta il video a destra del margine della Dynamic Island
+   (lo legge dalla pagina, anche se il lettore è altrove). A schermo intero tolgo alla pagina il "viewport-fit=cover":
+   iOS allora mette l'app solo nella zona sicura e il margine diventa zero, quindi il video resta centrato. All'uscita lo rimetto. */
+function safeFit(on){
+  const m = document.querySelector('meta[name="viewport"]'); if (!m) return;
+  if (!m.dataset.orig) m.dataset.orig = m.content;
+  m.content = on ? m.dataset.orig.replace(/,\s*viewport-fit=cover/, "") : m.dataset.orig;
+  document.documentElement.style.background = on ? "#000" : "";
+  [100, 400, 900].forEach(t => setTimeout(fitFrame, t));
+}
 function fitFrame(){
   const f = $("#pFrame"); if (!f) return;
   if (!document.documentElement.classList.contains("pfs")) { f.removeAttribute("style"); return; }
@@ -2896,8 +2906,11 @@ function fitFrame(){
   const vw = innerWidth, vh = innerHeight, l = px("paddingLeft"), r = px("paddingRight"), t = px("paddingTop"), b = px("paddingBottom");
   const land = vw > vh, aw = vw - (land ? Math.max(l, r) * 2 : 0), ah = vh - (land ? 0 : t + b);
   let w = Math.min(aw, ah * 16 / 9), h = w * 9 / 16; w = Math.floor(w); h = Math.floor(h);
-  f.style.cssText = `position:absolute;inset:auto;left:${Math.round((vw - w) / 2)}px;top:${Math.round(land ? (vh - h) / 2 : t + (ah - h) / 2)}px;width:${w}px;height:${h}px;aspect-ratio:auto;max-width:none`;
-  try { yp?.setSize?.(w, h); } catch {}
+  let left = Math.round((vw - w) / 2), fw = w;
+  // se iOS non ha tolto il margine, lo compenso: YouTube centra il video nel riquadro e poi lo sposta a destra del margine
+  if (land && l > 0) { left -= 2 * l; fw += 2 * l; }
+  f.style.cssText = `position:absolute;inset:auto;left:${left}px;top:${Math.round(land ? (vh - h) / 2 : t + (ah - h) / 2)}px;width:${fw}px;height:${h}px;aspect-ratio:auto;max-width:none`;
+  try { yp?.setSize?.(fw, h); } catch {}
 }
 addEventListener("resize", () => { if (document.documentElement.classList.contains("pfs")) { fitFrame(); setTimeout(fitFrame, 350); setTimeout(fitFrame, 900); } });
 // girando il telefono in verticale si esce dallo schermo intero, come nell'app di YouTube
@@ -4563,7 +4576,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104225922";
+const BUILD = "20261104230551";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
