@@ -395,11 +395,14 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .full:not(.land) #player.open .frame{width:100%;height:100%;aspect-ratio:auto}
 /* schermo intero vero (API del browser) sul riquadro del player: niente lettore di sistema di iOS */
 #fsExit{display:none}
-#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{display:grid;place-items:center;position:absolute;z-index:4;left:10px;top:10px;width:34px;height:34px;border:0;border-radius:50%;
+.pfs #player.open{overflow:hidden}
+.pfs #pWrap{position:fixed;inset:0;z-index:100;background:#000}
+.pfs #pWrap .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none}
+.pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{display:grid;place-items:center;position:absolute;z-index:4;left:10px;top:10px;width:34px;height:34px;border:0;border-radius:50%;
   background:rgba(0,0,0,.55);color:#fff;opacity:.35;transition:opacity .4s}
 #pWrap.fsfresh #fsExit{opacity:1}
 #fsExit svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round}
-@media (orientation:portrait){#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{top:calc(env(safe-area-inset-top) + 8px)}}
+@media (orientation:portrait){.pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{top:calc(env(safe-area-inset-top) + 8px)}}
 #pWrap:fullscreen{width:100%;height:100%;background:#000}
 #pWrap:-webkit-full-screen{width:100%;height:100%;background:#000}
 #pWrap:fullscreen .frame{width:100%;height:100%;aspect-ratio:auto}
@@ -2275,7 +2278,7 @@ function renderSettings(){
         <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${esc(k)}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
         <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${esc(k)}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-      <label class="toggle"><div>Schermo intero di iOS<small>${realFs() || S.opt.ytFs ? "Accesa: usa il lettore di sistema di iPhone (doppia barra del volume). Spenta: schermo intero di YTG con il pulsante ⛶ sotto il video." : "Questo browser non permette lo schermo intero di YTG: si usa quello di iOS."}</small></div><input type="checkbox" class="switch" id="o_ytfs" ${S.opt.ytFs || !realFs() ? "checked" : ""} ${!realFs() && !S.opt.ytFs ? "disabled" : ""}></label>
+      <label class="toggle"><div>Schermo intero di iOS<small>Accesa: il pulsante di schermo intero del lettore YouTube apre il lettore di sistema di iPhone (doppia barra del volume). Spenta: schermo intero di YTG con il pulsante ⛶ in alto nel player.</small></div><input type="checkbox" class="switch" id="o_ytfs" ${S.opt.ytFs ? "checked" : ""}></label>
       <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
       <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
@@ -2771,7 +2774,7 @@ function renderChanStats(){
     ${vids.length ? vids.map(o => statVRow(o.x, sub(o))).join("") : `<div class="status" style="padding:4px 16px">Nessun video di questo canale nella tua cronologia di YTG.</div>`}
     <div style="height:24px"></div>`;
 }
-function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; document.documentElement.classList.remove("full"); }
+function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; document.documentElement.classList.remove("full", "pfs"); }
 
 /* ---------- controlli del player ---------- */
 const CI = {
@@ -2863,32 +2866,36 @@ async function startPlayer(id, start){
    questo porta la doppia barra del volume e la Dynamic Island "attiva" (iOS considera YTG in secondo piano).
    YouTube in Safari invece mette a schermo intero la pagina stessa (API Fullscreen del browser): lo facciamo anche noi
    sul riquadro del player, con il lettore YouTube e i suoi comandi intatti. Se il browser non lo permette, resta il metodo di prima. */
-const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
-function realFs(){
-  if (S.opt.ytFs) return false;
-  const w = document.getElementById("pWrap");
-  return !!(w && (document.fullscreenEnabled || document.webkitFullscreenEnabled) && (w.requestFullscreen || w.webkitRequestFullscreen));
-}
+function fsEl(){ return document.fullscreenElement || document.webkitFullscreenElement || null; }
+/* realFs: schermo intero di YTG (vero se il browser lo permette, altrimenti il riquadro del player copre tutto lo schermo:
+   da app sulla Home non ci sono barre del browser, quindi il risultato è lo stesso). Il video resta nella pagina: niente lettore di iOS. */
+function realFs(){ return !S.opt.ytFs; }
+function apiFs(w){ return !!(w && (document.fullscreenEnabled || document.webkitFullscreenEnabled) && (w.requestFullscreen || w.webkitRequestFullscreen)); }
+function inFull(){ return !!fsEl() || document.documentElement.classList.contains("pfs"); }
 async function toggleFull(){
   const root = document.documentElement, w = $("#pWrap");
-  if (fsEl()) { try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch {} return; }
-  if (realFs()) {
-    try {
-      const p = w.requestFullscreen ? w.requestFullscreen({ navigationUI: "hide" }) : w.webkitRequestFullscreen();
-      if (p?.then) await p;
-      root.classList.add("full"); paintCtl();
-      w.classList.add("fsfresh"); setTimeout(() => w.classList.remove("fsfresh"), 3000);   // la ✕ si vede bene per 3 secondi, poi resta tenue
-      return;
-    } catch {}
-  }
-  root.classList.toggle("full"); $("#player").scrollTop = 0;     // ripiego: schermo intero dentro l'app
+  if (fsEl()) { root.classList.remove("pfs"); try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch {} return; }
+  if (root.classList.contains("pfs")) { root.classList.remove("pfs"); paintCtl(); return; }
+  let ok = false;
+  if (apiFs(w)) { try { const p = w.requestFullscreen ? w.requestFullscreen({ navigationUI: "hide" }) : w.webkitRequestFullscreen(); if (p?.then) await p; else await new Promise(r => setTimeout(r, 400)); ok = !!fsEl(); } catch {} }
+  if (!ok) root.classList.add("pfs");
+  fsLand = matchMedia("(orientation: landscape)").matches;
+  w.classList.add("fsfresh"); setTimeout(() => w.classList.remove("fsfresh"), 3000);   // la ✕ si vede bene per 3 secondi, poi resta tenue
+  paintCtl();
 }
 // girando il telefono in verticale si esce dallo schermo intero, come nell'app di YouTube
-matchMedia("(orientation: portrait)").addEventListener?.("change", e => { if (e.matches && fsEl()?.id === "pWrap" && fsLand) toggleFull(); });
 let fsLand = false;
-setInterval(() => { if (fsEl()?.id === "pWrap") { if (matchMedia("(orientation: landscape)").matches) fsLand = true; } else fsLand = false; }, 1000);
+const mqLand = matchMedia("(orientation: landscape)");          // tenuto in una variabile: altrimenti il browser può buttarlo via
+let lastLand = mqLand.matches;
+function fsOrient(){                                             // anche con "resize": su alcuni browser il cambio di orientamento non avvisa
+  const land = mqLand.matches; if (land === lastLand) return; lastLand = land;
+  if (land) { if (inFull()) fsLand = true; }
+  else if (inFull() && fsLand) { fsLand = false; toggleFull(); }
+}
+mqLand.addEventListener?.("change", fsOrient);
+addEventListener("resize", fsOrient);
 ["fullscreenchange", "webkitfullscreenchange"].forEach(ev => document.addEventListener(ev, () => {
-  if (!fsEl()) document.documentElement.classList.remove("full");
+  if (!fsEl()) document.documentElement.classList.remove("full"); else document.documentElement.classList.remove("pfs");
   paintCtl();
 }));
 function tryFullscreen(){
@@ -4539,7 +4546,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104223830";
+const BUILD = "20261104225030";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
