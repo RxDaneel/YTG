@@ -401,8 +401,8 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px;
 #safeProbe{position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;
   padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
 .pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{display:grid;place-items:center;position:absolute;z-index:4;left:10px;top:10px;width:34px;height:34px;border:0;border-radius:50%;
-  background:rgba(0,0,0,.55);color:#fff;opacity:.35;transition:opacity .4s}
-#pWrap.fsfresh #fsExit{opacity:1}
+  background:rgba(0,0,0,.55);color:#fff;opacity:0;pointer-events:none;transition:opacity .3s}
+#pWrap.fsshow #fsExit{opacity:1;pointer-events:auto}
 #fsExit svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round}
 @media (orientation:portrait){.pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{top:calc(env(safe-area-inset-top) + 8px)}}
 #pWrap:fullscreen{width:100%;height:100%;background:#000}
@@ -2860,7 +2860,7 @@ async function startPlayer(id, start){
     width: "100%", height: "100%", videoId: id, host: "https://www.youtube-nocookie.com",
     playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, controls: 1, fs: realFs() ? 0 : 1, iv_load_policy: 3, cc_load_policy: 0, ...(start > 0 ? { start: Math.floor(start) } : {}) },
     events: {
-      onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) { ctlShow(true); savePos(); } else if (e.data === 1) ctlShow(); },
+      onStateChange: e => { paintCtl(); if (e.data === 2 || e.data === 0) { ctlShow(true); savePos(); if (inFull()) showX(true); } else if (e.data === 1) { ctlShow(); if (inFull() && $("#pWrap").classList.contains("fsshow")) showX(); } },
       onReady: e => {
         e.target.playVideo(); paintCtl();
         // i video partono senza sottotitoli (si attivano dal pulsante CC del lettore, solo per quel video)
@@ -2896,7 +2896,7 @@ async function toggleFull(){
   if (apiFs(w)) { try { const p = w.requestFullscreen ? w.requestFullscreen({ navigationUI: "hide" }) : w.webkitRequestFullscreen(); if (p?.then) await p; else await new Promise(r => setTimeout(r, 400)); ok = !!fsEl(); } catch {} }
   if (!ok) { root.classList.add("pfs"); safeFit(true); fitFrame(); }
   fsLand = matchMedia("(orientation: landscape)").matches;
-  w.classList.add("fsfresh"); setTimeout(() => w.classList.remove("fsfresh"), 3000);   // la ✕ si vede bene per 3 secondi, poi resta tenue
+  showX();                                                   // la ✕ compare per qualche secondo, poi sparisce
   paintCtl();
 }
 /* Schermo intero dentro l'app: il riquadro del video ha esattamente le proporzioni 16:9 ed è centrato nella zona sicura
@@ -2924,6 +2924,19 @@ function fitFrame(){
   try { yp?.setSize?.(fw, h); } catch {}
 }
 addEventListener("resize", () => { if (document.documentElement.classList.contains("pfs")) { fitFrame(); setTimeout(fitFrame, 350); setTimeout(fitFrame, 900); } });
+/* La ✕ per uscire: compare entrando, toccando le bande nere ai lati (o sopra/sotto) del video e quando metti in pausa;
+   sparisce da sola dopo 3 secondi mentre il video va. I tocchi sul video vanno al lettore YouTube e YTG non li vede. */
+let xTimer = 0;
+function showX(stay){
+  const w = $("#pWrap"); if (!w) return;
+  w.classList.add("fsshow"); clearTimeout(xTimer);
+  if (!stay) xTimer = setTimeout(() => { try { if (yp?.getPlayerState?.() === 2) return; } catch {} w.classList.remove("fsshow"); }, 3000);
+}
+function hideX(){ clearTimeout(xTimer); $("#pWrap")?.classList.remove("fsshow"); }
+document.getElementById("pWrap")?.addEventListener("click", e => {
+  if (!inFull() || e.target.closest("#fsExit")) return;
+  $("#pWrap").classList.contains("fsshow") ? hideX() : showX();
+});
 // girando il telefono in verticale si esce dallo schermo intero, come nell'app di YouTube
 let fsLand = false;
 const mqLand = matchMedia("(orientation: landscape)");          // tenuto in una variabile: altrimenti il browser può buttarlo via
@@ -4589,7 +4602,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104231941";
+const BUILD = "20261104232435";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
