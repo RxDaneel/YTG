@@ -398,6 +398,9 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
 .pfs #player.open{overflow:hidden}
 .pfs #pWrap{position:fixed;inset:0;z-index:100;background:#000}
 .pfs #pWrap .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none}
+/* iPhone in orizzontale: il lettore YouTube sposta il video del margine della Dynamic Island (circa 59 px a sinistra).
+   Il riquadro sta dentro la zona sicura a destra e a sinistra, così il video torna centrato sullo schermo. */
+@media (orientation:landscape){.pfs #pWrap .frame{left:env(safe-area-inset-left,0px);right:env(safe-area-inset-right,0px);width:auto}}
 .pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{display:grid;place-items:center;position:absolute;z-index:4;left:10px;top:10px;width:34px;height:34px;border:0;border-radius:50%;
   background:rgba(0,0,0,.55);color:#fff;opacity:.35;transition:opacity .4s}
 #pWrap.fsfresh #fsExit{opacity:1}
@@ -4546,7 +4549,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104225030";
+const BUILD = "20261104225420";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
