@@ -3581,13 +3581,53 @@ function renderChannelHead(){
   $("#chBody").innerHTML = `
     ${banner ? `<div class="banner" style="background-image:url('${esc(banner)}=w1060')"></div>` : ""}
     <div class="chead"><img src="${esc(thumb)}" alt=""><div style="min-width:0;flex:1"><h2>${esc(s.title)}</h2><div class="sub">${esc(meta)}</div></div></div>
-    <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button></div>
+    <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button>
+      <button class="more" data-act="chDiag" style="margin-left:12px;font-size:13px">Controlla il feed</button></div>
+    <div id="chDiag"></div>
     ${s.description ? `<div class="cabout" id="cAbout">${esc(s.description)}</div><div style="padding:0 16px"><button class="more" data-act="chAbout">Altro</button></div>` : ""}
     <div class="ctabs"><button data-ctab="videos" aria-current="${CH.tab === "videos"}">Video</button><button data-ctab="live" aria-current="${CH.tab === "live"}">Live</button><button data-ctab="playlists" aria-current="${CH.tab === "playlists"}">Playlist</button></div>
     <form class="searchbar" id="chSearch" style="padding-top:10px"><input id="chQ" type="search" enterkeyhint="search" placeholder="Cerca nel canale" autocomplete="off"><button class="btn" type="submit">Cerca</button></form>
     <div id="chList"></div><div style="padding:4px 16px"><button class="more" id="chMoreBtn" data-act="chMore" hidden>Carica altri video</button></div>`;
 }
 
+/* Controllo: confronta gli ultimi video del canale con quelli nel feed Iscrizioni, dice perché manca qualcosa e li rimette. */
+async function chanDiag(){
+  const id = CH.id, box = $("#chDiag"); if (!box) return;
+  box.innerHTML = `<div class="status" style="padding:4px 16px 10px">Controllo…</div>`;
+  const out = [], line = (t, w) => out.push(`<li style="margin:4px 0">${t}${w ? ` <span class="sub">${w}</span>` : ""}</li>`);
+  try {
+    const sub = isSub(id), tail = id.slice(2);
+    const [all, lf] = await Promise.all([
+      api("playlistItems", { part: "contentDetails", playlistId: "UU" + tail, maxResults: 15 }).catch(e => ({ err: e })),
+      api("playlistItems", { part: "contentDetails", playlistId: "UULF" + tail, maxResults: 15 }).catch(e => ({ err: e }))]);
+    if (all.err) throw all.err;
+    const ids = (all.items || []).map(i => i.contentDetails.videoId), lfIds = new Set((lf.items || []).map(i => i.contentDetails.videoId));
+    const det = ids.length ? await videoDetails(ids) : [], byId = new Map(det.map(v => [v.id, v]));
+    const inFeed = new Set(S.videos.map(v => v.ch === id && v.id).filter(Boolean)), m = S.chMeta?.[id];
+    if (!sub) line("<b>Non risulti iscritto a questo canale in YTG</b>: per questo i suoi video non sono nel feed.", "Se su YouTube lo sei, tocca Sincronizza in Impostazioni.");
+    if (lf.err) line("YouTube non dà la lista dei soli video lunghi di questo canale: uso quella completa e tolgo da solo gli Shorts.");
+    let missing = [];
+    for (const vid of ids) {
+      const v = byId.get(vid), t = v ? esc(v.snippet.title.slice(0, 70)) : vid;
+      if (!v) { line(`✕ ${t}`, "privato, eliminato o solo per membri"); continue; }
+      const d = secs(v.contentDetails.duration);
+      if (inFeed.has(vid)) { line(`✓ ${t}`, "nel feed"); continue; }
+      if (v.snippet.liveBroadcastContent === "upcoming") { line(`◷ ${t}`, "première non ancora iniziata"); continue; }
+      if (!lfIds.has(vid) && !lf.err) { line(`– ${t}`, "è uno Short (YouTube lo mette tra gli Shorts)"); continue; }
+      if (lf.err && looksShort(v, d)) { line(`– ${t}`, "sembra uno Short (≤ 3 min)"); continue; }
+      missing.push(v); line(`<b>! ${t}</b>`, "mancava dal feed");
+    }
+    if (m) line(`Ultimo controllo del canale: ${ago(new Date(m.at).toISOString())}.`);
+    if (sub && missing.length) {
+      const add = remember(missing.map(toVideo)), have = new Set(S.videos.map(v => v.id));
+      S.videos = S.videos.concat(add.filter(v => !have.has(v.id))).sort((a, b) => b.at.localeCompare(a.at));
+      if (m) { m.sk = (m.sk || []).filter(x => !missing.some(v => v.id === x)); m.n = -1; }
+      save(); ensureAvatars?.(add);
+      line(`<b>Ho aggiunto ${missing.length} video al feed.</b>`);
+    } else if (sub && !out.some(x => x.includes("!"))) line("Nel feed c'è tutto quello che YTG mostra di questo canale.");
+    box.innerHTML = `<div class="panel" style="margin:0 16px 12px;padding:12px 14px"><ul style="margin:0;padding-left:18px;font-size:13.5px;line-height:1.4">${out.join("")}</ul></div>`;
+  } catch (e) { box.innerHTML = `<div class="status err" style="padding:4px 16px 10px">${esc(errMsg(e))}</div>`; }
+}
 function rowHTML(x){
   return `<button class="row" data-v="${esc(x.id)}"><div class="thumb"><img loading="lazy" decoding="async" src="${esc(thumbOf(x))}" alt="">
     ${x.live ? `<span class="dur live">LIVE</span>` : x.dur ? `<span class="dur">${fmtDur(x.dur)}</span>` : ""}${progBar(x.id)}</div>
@@ -4250,6 +4290,7 @@ document.addEventListener("click", e => {
   if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
   if (a === "syncNow") return syncNow(true);
+  if (a === "chDiag") return chanDiag();
   if (a === "syncStart") {
     if (!S.clientId) return toast("Prima configura l'accesso con Google");
     if (!driveOk() && !(S.refresh && (S.grant || "").includes(DRIVE))) return startLogin({ do: "syncOn", tab });
@@ -4412,7 +4453,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104150305";
+const BUILD = "20261104151309";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
