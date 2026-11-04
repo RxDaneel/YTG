@@ -2247,7 +2247,7 @@ function importBackup(text){
 function renderSettings(){
   const v = $("#vSettings"), o = S.opt;
   const masked = S.key ? S.key.slice(0, 6) + "…" + S.key.slice(-4) : "";
-  v.innerHTML = `<div class="section">
+  const html = `<div class="section">
     <h2>Il tuo account</h2>
     <div class="panel"><div class="list-item">
       ${S.me ? `<img class="avatar" src="${esc(S.me.thumb)}" alt=""><span style="white-space:normal"><b>${esc(S.me.title)}</b><br><small style="color:var(--muted)">${S.channels.length} iscrizioni${S.lastSync ? " · sincronizzate " + ago(new Date(S.lastSync).toISOString()) : ""}</small></span>
@@ -2271,7 +2271,7 @@ function renderSettings(){
         `<button class="chip chipq${(o.cols ?? 4) === k ? " on" : ""}" data-cols="${esc(k)}" style="padding:7px 16px">${l}</button>`).join("")}</div>
         <div class="sub" style="margin-top:10px">Solo su schermi grandi (PC): Home, Iscrizioni e Ricerca. Automatico mette tutti quelli che stanno nella finestra.</div></div>
     </div>
-    <h2 style="margin-top:22px">Contenuti</h2>
+    <h2 style="margin-top:22px">Home</h2>
     <div class="panel">
       <label class="toggle"><div>Mostra la Home<small>Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
       <label class="toggle"><div>Video da canali che non segui<small>In Home, 3 video ogni 10 da canali nuovi, solo sui temi (tag) dei creator che segui. Spenta: solo canali che segui o guardi.</small></div><input type="checkbox" class="switch" id="o_disc" ${o.homeDisc !== false ? "checked" : ""}></label>
@@ -2279,6 +2279,9 @@ function renderSettings(){
       ${S.mutedTopics.length ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="unmuteAll">Temi tolti dalla Home: ${esc(S.mutedTopics.join(", "))}<small>Tocca per rimetterli tutti</small></button>` : ""}
       <label class="toggle"><div>Paese della Home e della ricerca</div>
         <select class="pick" id="o_region">${Object.entries(REGIONS).map(([k, n]) => `<option value="${esc(k)}" ${k === o.region ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+    </div>
+    <h2 style="margin-top:22px">Video e lettore</h2>
+    <div class="panel">
       <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
         <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${esc(k)}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <label class="toggle"><div>Schermo intero di iOS<small>Accesa: il pulsante di schermo intero del lettore YouTube apre il lettore di sistema di iPhone (doppia barra del volume). Spenta: schermo intero di YTG con il pulsante ⛶ in alto nel player.</small></div><input type="checkbox" class="switch" id="o_ytfs" ${S.opt.ytFs ? "checked" : ""}></label>
@@ -2287,6 +2290,7 @@ function renderSettings(){
       <label class="toggle"><div>Video per canale<small>Quanti video recenti tenere per ogni iscrizione</small></div>
         <select class="pick" id="o_n">${[5,8,15,25].map(n => `<option ${n === o.perChannel ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
+    <!--ADV-->
     <h2 style="margin-top:22px">Unità di oggi</h2>
     <div class="panel" style="padding:14px">
       <div style="display:flex;justify-content:space-between;font-size:14px;font-variant-numeric:tabular-nums"><b>${(S.qDay === qDay() ? S.qUsed || 0 : 0).toLocaleString("it-IT")} usate</b><span style="color:var(--muted)">su 10.000</span></div>
@@ -2345,7 +2349,16 @@ function renderSettings(){
       ${S.lastFail ? `Ultimo errore: ${S.lastFail.n}/${S.lastFail.of} canali · ${esc(S.lastFail.msg)}` : lastError ? "Ultimo errore: " + esc(lastError) : "Nessun errore recente"}
     </div></div>
   </div>`;
+  /* Impostazioni divise in due: quelle d'uso qui, quelle tecniche (chiavi, server, quota, backup, dati, diagnostica) in "Avanzate" */
+  const [main, adv] = html.split("<!--ADV-->");
+  const advRow = `<h2 style="margin-top:22px">Altro</h2>
+    <div class="panel"><button class="toggle" style="width:100%;border:0;background:none;text-align:left" data-act="setAdv">Avanzate ›<small>Chiave API, accesso con Google, accesso permanente, unità, backup, dati e diagnostica</small></button></div>
+    <div class="status" style="padding:14px 0 24px">Versione ${esc(BUILD)} · <a href="privacy.html" target="_blank" rel="noopener" style="color:inherit">Privacy</a></div></div>`;
+  v.innerHTML = SET_ADV
+    ? `<div class="section"><button class="more" data-act="setMain" style="padding:4px 0 2px">‹ Impostazioni</button><h2 style="margin-top:6px;font-size:20px;text-transform:none;letter-spacing:0;color:var(--fg)">Avanzate</h2>` + adv
+    : main + advRow;
 }
+let SET_ADV = false;
 
 /* ---------- notifiche: commenti ----------
    1) commenti sotto i tuoi video (commentThreads con allThreadsRelatedToChannelId, 1 unità);
@@ -4233,6 +4246,7 @@ function rerender(){
 function go(t){
   stopPreview(); if (t !== "vSubs") GE = null;
   if (t === "vHome" && !S.opt.showHome) t = "vSubs";
+  if (t === "vSettings" && tab !== "vSettings") SET_ADV = false;
   tab = t;
   document.querySelectorAll(".view").forEach(v => v.hidden = v.id !== t);
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-current", b.dataset.tab === t));
@@ -4410,6 +4424,7 @@ document.addEventListener("click", e => {
   if (a === "meLogin") return reauth({ do: "me" });
   if (a === "meLiked") return openMyPlaylist("liked");
   if (a === "syncNow") return syncNow(true);
+  if (a === "setAdv" || a === "setMain") { SET_ADV = a === "setAdv"; renderSettings(); return toTop(); }
   if (a === "chDiag") return chanDiag();
   if (a === "syncStart") {
     if (!S.clientId) return toast("Prima configura l'accesso con Google");
@@ -4574,7 +4589,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104231056";
+const BUILD = "20261104231542";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
