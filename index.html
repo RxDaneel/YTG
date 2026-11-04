@@ -1868,10 +1868,47 @@ function doSearch(q, noFix){
   searchErr = ""; searchYT = false;
   vocabC = null;
   const hit = searchCached(searchQ, "") || searchCached(searchQ, "h:");
+  searchCh = localChannels(searchQ);
+  if (S.key && !quotaOut()) { const qq = searchQ; searchChannels(qq).then(l => { if (searchQ === qq) { searchCh = pickChannels(qq, l); renderSearch(); } }).catch(() => {}); }
   if (hit) { searchRes = hit; searchYT = true; searchLocal = null; ensureAvatars(searchRes); return renderSearch(); }
   searchLocal = localSearch(searchQ); searchRes = null;
   if (S.key && !quotaOut()) return doSearchYT();
   renderSearch(); ensureAvatars(searchLocal);
+}
+/* ---------- canali nella ricerca: prima quelli che segui (gratis), poi quelli di YouTube (100 + 1 unità, salvati 24 ore) ---------- */
+let searchCh = [];
+const chWords = q => normTxt(q).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 1);
+function localChannels(q){
+  const ws = chWords(q); if (!ws.length) return [];
+  return S.channels.filter(c => { const t = normTxt(c.title); return ws.every(w => t.includes(w)); })
+    .map(c => ({ id: c.id, title: c.title, thumb: c.thumb || avatarOf(c.id, c.title), sub: true })).slice(0, 4);
+}
+async function searchChannels(q){
+  const C = S.chSearch || (S.chSearch = {}), k = normTxt(q).trim();
+  if (C[k] && Date.now() - C[k].at < 24 * 3600000) return C[k].list;
+  const j = await api("search", { part: "snippet", q, type: "channel", maxResults: 6, regionCode: S.opt.region });
+  const ids = (j.items || []).map(i => i.snippet.channelId || i.id.channelId).filter(Boolean);
+  const st = ids.length ? await api("channels", { part: "statistics,snippet", id: ids.join(",") }).catch(() => ({ items: [] })) : { items: [] };
+  const m = new Map((st.items || []).map(c => [c.id, c]));
+  const list = ids.map(id => { const c = m.get(id); if (!c) return null;
+    return { id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url || "", handle: c.snippet.customUrl || "",
+      subs: c.statistics?.hiddenSubscriberCount ? 0 : +c.statistics?.subscriberCount || 0, n: +c.statistics?.videoCount || 0 }; }).filter(Boolean);
+  C[k] = { at: Date.now(), list };
+  Object.keys(C).sort((a, b) => C[b].at - C[a].at).slice(30).forEach(x => delete C[x]);
+  save(); return list;
+}
+function pickChannels(q, yt){
+  const ws = chWords(q), out = localChannels(q), have = new Set(out.map(c => c.id));
+  const match = c => { const t = normTxt(c.title + " " + (c.handle || "")); return ws.filter(w => t.includes(w)).length >= Math.max(1, Math.ceil(ws.length / 2)); };
+  (yt || []).forEach((c, i) => { if (!have.has(c.id) && (match(c) || (i === 0 && c.subs > 50000))) { out.push({ ...c, sub: isSub(c.id) }); have.add(c.id); } });
+  return out.slice(0, 4);
+}
+function channelRows(){
+  if (!searchCh.length) return "";
+  return `<div class="group">Canali</div>` + searchCh.map(c => `<button class="row" data-ch="${esc(c.id)}" style="align-items:center">
+      <div style="width:120px;flex:none;display:grid;place-items:center"><img src="${esc(c.thumb || avatarOf(c.id, c.title))}" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:var(--raised)"></div>
+      <div style="min-width:0"><div class="title">${esc(c.title)}</div><div class="sub">${esc([c.handle, c.subs ? subs(c.subs) : "", c.n ? c.n.toLocaleString("it-IT") + " video" : ""].filter(Boolean).join(" · "))}</div>
+        ${c.sub || isSub(c.id) ? `<div class="sub" style="margin-top:2px">Iscritto ✓</div>` : ""}</div></button>`).join("") + `<div class="group">Video</div>`;
 }
 async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
@@ -2106,7 +2143,7 @@ function renderSearch(){
     const few = sRange && sRange !== sRangeYT && good.length < 8 && !quotaOut()
       ? `<div style="padding:10px 16px 14px"><button class="btn ghost" data-act="searchRange" style="font-size:13px;padding:8px 14px">Cerca su YouTube solo video dell'ultim${sRange === "w" ? "a settimana" : sRange === "m" ? "o mese" : "o anno"} · ${searchCached(searchQ, "p" + sRange + ":") ? "gratis" : "100 unità"}</button></div>` : "";
     const fixNote = sOrig ? `<div class="help" style="padding:10px 16px 0">Risultati per <b>${esc(searchQ)}</b> · <button class="more" data-act="searchOrig" style="padding:0">cerca invece “${esc(sOrig)}”</button></div>` : "";
-    r.innerHTML = fixNote + searchToolbar() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
+    r.innerHTML = fixNote + searchToolbar() + channelRows() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
       + (more ? tail : (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : ""));
   }
   else r.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
@@ -4453,7 +4490,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104151309";
+const BUILD = "20261104151625";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
