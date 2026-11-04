@@ -2895,8 +2895,7 @@ async function toggleFull(){
 function safeFit(on){
   const m = document.querySelector('meta[name="viewport"]'); if (!m) return;
   if (!m.dataset.orig) m.dataset.orig = m.content;
-  // togliere viewport-fit=cover centra il video ma riaccende la Dynamic Island: resta com'è e il video si centra compensando (fitFrame)
-  m.content = m.dataset.orig;
+  m.content = on ? m.dataset.orig.replace(/,\s*viewport-fit=cover/, "") : m.dataset.orig;
   document.documentElement.style.background = on ? "#000" : "";
   [100, 400, 900].forEach(t => setTimeout(fitFrame, t));
 }
@@ -2908,8 +2907,6 @@ function fitFrame(){
   const land = vw > vh, aw = vw - (land ? Math.max(l, r) * 2 : 0), ah = vh - (land ? 0 : t + b);
   let w = Math.min(aw, ah * 16 / 9), h = w * 9 / 16; w = Math.floor(w); h = Math.floor(h);
   let left = Math.round((vw - w) / 2), fw = w;
-  // se iOS non ha tolto il margine, lo compenso: YouTube centra il video nel riquadro e poi lo sposta a destra del margine
-  if (land && l > 0) { left -= 2 * l; fw += 2 * l; }
   f.style.cssText = `position:absolute;inset:auto;left:${left}px;top:${Math.round(land ? (vh - h) / 2 : t + (ah - h) / 2)}px;width:${fw}px;height:${h}px;aspect-ratio:auto;max-width:none`;
   try { yp?.setSize?.(fw, h); } catch {}
 }
@@ -4577,7 +4574,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104230841";
+const BUILD = "20261104231056";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
