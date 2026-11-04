@@ -1119,7 +1119,7 @@ async function refresh(manual, full){
     const last = {}; for (const v of S.videos) if (!last[v.ch] || v.at > last[v.ch]) last[v.ch] = v.at;
     const daily = full || now - (S.inactiveCheck || 0) > 24 * 3600000;
     const active = id => !meta[id] || (last[id] && now - Date.parse(last[id]) < 60 * 864e5);
-    const checkIds = daily ? ids : ids.filter(active);
+    const checkIds = ids;                       // tutti i canali a ogni aggiornamento: 1 unità ogni 50 canali
     for (let i = 0; i < checkIds.length; i += 50) batches.push(checkIds.slice(i, i + 50));
     if (daily) S.inactiveCheck = now;
     const pages = await pool(batches, 4, b => api("channels", { part: "statistics", id: b.join(","), maxResults: 50 }));
@@ -1153,7 +1153,7 @@ async function refresh(manual, full){
     const due = c => (now - meta[c.id].at) / (gap(c.id) || 1);
     const sweep = full ? S.channels.filter(c => !inChanged.has(c.id))
       : S.channels.filter(c => meta[c.id] && !inChanged.has(c.id)).map(c => [due(c), c]).filter(x => x[0] >= 1)
-          .sort((a, b) => b[0] - a[0]).slice(0, 5).map(x => x[1]);
+          .sort((a, b) => b[0] - a[0]).slice(0, 15).map(x => x[1]);
     const todo = changed.concat(sweep);
     let done = 0; progress(0, todo.length);
     const res = await pool(todo, 8, ch => channelUploads(ch).finally(() => progress(++done, todo.length)));
@@ -4412,7 +4412,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261103101725";
+const BUILD = "20261104150305";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
