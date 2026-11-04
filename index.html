@@ -249,7 +249,7 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:23px;height:23px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s}
 .switch:checked{background:var(--accent)}
 .switch:checked::after{transform:translateX(19px)}
-select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px}
+select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px;max-width:44%;flex:none;text-overflow:ellipsis}
 .help{color:var(--muted);font-size:13px;line-height:1.55;padding:0 4px}
 .help ol{padding-left:20px;margin:8px 0}
 .help code{background:var(--raised);padding:1px 4px;border-radius:4px;font-size:12px;word-break:break-all}
@@ -3517,7 +3517,7 @@ function ytTarget(u){
   m = url.pathname.match(/^\/(@[\w.\-]+)\/?/); if (m) return { handle: m[1] };
   return null;
 }
-const BROWSERS = { "": "Automatico (decide iOS)", safari: "Safari", chrome: "Chrome", firefox: "Firefox", edge: "Edge", brave: "Brave" };
+const BROWSERS = { "": "Automatico", safari: "Safari", chrome: "Chrome", firefox: "Firefox", edge: "Edge", brave: "Brave" };
 function extHref(h){
   switch (S.opt.browser) {
     case "safari": return "x-safari-" + h;
@@ -4589,7 +4589,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104231542";
+const BUILD = "20261104231941";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
