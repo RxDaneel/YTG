@@ -2348,7 +2348,7 @@ function renderSettings(){
     <div class="panel" style="padding:12px 14px"><div class="help" style="padding:0;font-variant-numeric:tabular-nums;line-height:1.7">
       Versione ${esc(BUILD)} · ${idb ? "memoria completa" : "memoria ridotta"} · <a href="privacy.html" target="_blank" rel="noopener" style="color:inherit">Privacy</a><br>
       Schermo: ${innerHeight} · ${Math.round(window.visualViewport?.height || 0)} · ${Math.max(screen.width, screen.height)} · app ${Math.round(document.body.getBoundingClientRect().height)} · margine sotto ${Math.round(parseFloat(getComputedStyle($("nav")).paddingBottom))}<br>
-      Account: ${esc(S.me?.title || "nessuno")}${S.myChId ? " (canale ok)" : ""} · accesso ${tokenOk() ? "attivo" : "scaduto"}<br>
+      ${FSDBG ? "Schermo intero: " + esc(FSDBG) + "<br>" : ""}Account: ${esc(S.me?.title || "nessuno")}${S.myChId ? " (canale ok)" : ""} · accesso ${tokenOk() ? "attivo" : "scaduto"}<br>
       Chiave: …${esc((S.key || "").slice(-4))} · ID client: …${esc((S.clientId || "").split("-")[0].slice(-4))}<br>
       Iscrizioni: ${S.channels.length} canali · ${Object.keys(S.chMeta || {}).length} controllati · ${S.videos.length} video<br>
       Video più recente: ${S.videos[0] ? esc(ago(S.videos[0].at)) + " (" + esc(S.videos[0].chTitle) + ")" : "nessuno"}<br>
@@ -2938,6 +2938,7 @@ function safeFit(on){
   document.documentElement.style.background = on ? "#000" : "";
   [100, 400, 900].forEach(t => setTimeout(fitFrame, t));
 }
+let FSDBG = "";
 function fitFrame(){
   const f = $("#pFrame"); if (!f) return;
   if (!document.documentElement.classList.contains("pfs")) { f.removeAttribute("style"); return; }
@@ -2949,6 +2950,9 @@ function fitFrame(){
   let left = Math.round((vw - w) / 2), fw = w;
   f.style.cssText = `position:absolute;inset:auto;left:${left}px;top:${Math.round(land ? (vh - h) / 2 : t + (ah - h) / 2)}px;width:${fw}px;height:${h}px;aspect-ratio:auto;max-width:none`;
   try { yp?.setSize?.(fw, h); } catch {}
+  // misure per la diagnostica (Impostazioni → Avanzate)
+  setTimeout(() => { const R = e => { const r = e?.getBoundingClientRect(); return r ? `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}×${Math.round(r.height)}` : "-"; };
+    FSDBG = `${document.documentElement.classList.contains("prot") ? "girato" : "normale"} · vista ${innerWidth}×${innerHeight} · margini ${Math.round(t)}/${Math.round(r)}/${Math.round(b)}/${Math.round(l)} · box ${left},${Math.round(land ? (vh - h) / 2 : 0)} ${fw}×${h} · pWrap ${$("#pWrap").offsetWidth}×${$("#pWrap").offsetHeight} → ${R($("#pWrap"))} · iframe ${R($("#pFrame iframe, #pFrame > *"))}`; }, 1200);
 }
 addEventListener("resize", () => { if (document.documentElement.classList.contains("pfs")) { fitFrame(); setTimeout(fitFrame, 350); setTimeout(fitFrame, 900); } });
 /* La ✕ per uscire: compare entrando, toccando le bande nere ai lati (o sopra/sotto) del video e quando metti in pausa;
@@ -4630,7 +4634,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261108072514";
+const BUILD = "20261108143119";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
