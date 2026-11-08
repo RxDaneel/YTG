@@ -405,6 +405,12 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px;
 #pWrap.fsshow #fsExit{opacity:1;pointer-events:auto}
 #fsExit svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round}
 @media (orientation:portrait){.pfs #fsExit,#pWrap:fullscreen #fsExit,#pWrap:-webkit-full-screen #fsExit{top:calc(env(safe-area-inset-top) + 8px)}}
+/* telefono in verticale: lo schermo intero gira da solo il video (riquadro ruotato di 90°), senza dover girare il telefono */
+.pfs.prot #pWrap{inset:auto;left:50%;top:50%;width:var(--rw);height:var(--rh);transform:translate(-50%,-50%) rotate(90deg)}
+.pfs.prot #fsExit{top:10px;left:calc(env(safe-area-inset-top,0px) + 8px)}
+/* rotazione bloccata: se il telefono è in orizzontale (fuori dallo schermo intero) l'app viene girata al contrario e resta verticale */
+html.plock{--top:max(env(safe-area-inset-left,0px),env(safe-area-inset-right,0px));--bot:14px}
+html.plock body{left:50%;top:50%;right:auto;width:var(--plw);height:var(--plh);transform:translate(-50%,-50%) rotate(var(--plr))}
 #pWrap:fullscreen{width:100%;height:100%;background:#000}
 #pWrap:-webkit-full-screen{width:100%;height:100%;background:#000}
 #pWrap:fullscreen .frame{width:100%;height:100%;aspect-ratio:auto}
@@ -2284,6 +2290,7 @@ function renderSettings(){
     <div class="panel">
       <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
         <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${esc(k)}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="toggle"><div>Blocca la rotazione<small>L'app resta in verticale anche se il blocco rotazione dell'iPhone è spento; lo schermo intero gira da solo il video.</small></div><input type="checkbox" class="switch" id="o_norot" ${S.opt.noRotate !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Schermo intero di iOS<small>Accesa: il pulsante di schermo intero del lettore YouTube apre il lettore di sistema di iPhone (doppia barra del volume). Spenta: schermo intero di YTG con il pulsante ⛶ in alto nel player.</small></div><input type="checkbox" class="switch" id="o_ytfs" ${S.opt.ytFs ? "checked" : ""}></label>
       <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
@@ -2790,7 +2797,7 @@ function renderChanStats(){
     ${vids.length ? vids.map(o => statVRow(o.x, sub(o))).join("") : `<div class="status" style="padding:4px 16px">Nessun video di questo canale nella tua cronologia di YTG.</div>`}
     <div style="height:24px"></div>`;
 }
-function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; if (document.documentElement.classList.contains("pfs")) safeFit(false); document.documentElement.classList.remove("full", "pfs"); $("#pFrame").removeAttribute("style"); }
+function stopPlayer(){ savePos(); ypId = ""; try { yp?.destroy(); } catch {} yp = null; $("#pFrame").innerHTML = ""; if (document.documentElement.classList.contains("pfs")) safeFit(false); document.documentElement.classList.remove("full", "pfs"); $("#pFrame").removeAttribute("style"); applyRot(); }
 
 /* ---------- controlli del player ---------- */
 const CI = {
@@ -2888,13 +2895,33 @@ function fsEl(){ return document.fullscreenElement || document.webkitFullscreenE
 function realFs(){ return !S.opt.ytFs; }
 function apiFs(w){ return !!(w && (document.fullscreenEnabled || document.webkitFullscreenEnabled) && (w.requestFullscreen || w.webkitRequestFullscreen)); }
 function inFull(){ return !!fsEl() || document.documentElement.classList.contains("pfs"); }
+/* Solo su telefono (schermo touch piccolo). iOS non permette alle app web di bloccare la rotazione: la compensiamo noi. */
+function isPhone(){ return matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600; }
+function devAngle(){ const a = typeof window.orientation === "number" ? window.orientation : screen.orientation?.angle ?? 0; return a === 270 ? -90 : a; }
+function applyRot(){
+  const root = document.documentElement, land = innerWidth > innerHeight, phone = isPhone();
+  // schermo intero con il telefono in verticale: video girato
+  const prot = phone && land === false && root.classList.contains("pfs");
+  root.classList.toggle("prot", prot);
+  if (prot) { root.style.setProperty("--rw", innerHeight + "px"); root.style.setProperty("--rh", innerWidth + "px"); }
+  // app bloccata in verticale
+  const lock = phone && land && S.opt.noRotate !== false && !inFull();
+  root.classList.toggle("plock", lock);
+  if (lock) {
+    root.style.setProperty("--plw", innerHeight + "px"); root.style.setProperty("--plh", innerWidth + "px");
+    root.style.setProperty("--plr", (devAngle() === -90 ? 90 : -90) + "deg");
+  }
+}
+addEventListener("resize", () => { applyRot(); setTimeout(applyRot, 300); });
+addEventListener("orientationchange", () => setTimeout(applyRot, 300));
+applyRot();
 async function toggleFull(){
   const root = document.documentElement, w = $("#pWrap");
   if (fsEl()) { root.classList.remove("pfs"); try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch {} return; }
-  if (root.classList.contains("pfs")) { root.classList.remove("pfs"); safeFit(false); fitFrame(); paintCtl(); return; }
+  if (root.classList.contains("pfs")) { root.classList.remove("pfs"); safeFit(false); applyRot(); fitFrame(); paintCtl(); return; }
   let ok = false;
   if (apiFs(w)) { try { const p = w.requestFullscreen ? w.requestFullscreen({ navigationUI: "hide" }) : w.webkitRequestFullscreen(); if (p?.then) await p; else await new Promise(r => setTimeout(r, 400)); ok = !!fsEl(); } catch {} }
-  if (!ok) { root.classList.add("pfs"); safeFit(true); fitFrame(); }
+  if (!ok) { root.classList.add("pfs"); applyRot(); safeFit(innerWidth > innerHeight); fitFrame(); }
   fsLand = matchMedia("(orientation: landscape)").matches;
   showX();                                                   // la ✕ compare per qualche secondo, poi sparisce
   paintCtl();
@@ -2916,7 +2943,8 @@ function fitFrame(){
   const f = $("#pFrame"); if (!f) return;
   if (!document.documentElement.classList.contains("pfs")) { f.removeAttribute("style"); return; }
   const cs = getComputedStyle($("#safeProbe")), px = k => parseFloat(cs[k]) || 0;
-  const vw = innerWidth, vh = innerHeight, l = px("paddingLeft"), r = px("paddingRight"), t = px("paddingTop"), b = px("paddingBottom");
+  let vw = innerWidth, vh = innerHeight, l = px("paddingLeft"), r = px("paddingRight"), t = px("paddingTop"), b = px("paddingBottom");
+  if (document.documentElement.classList.contains("prot")) { [vw, vh] = [innerHeight, innerWidth]; [l, r, t, b] = [t, b, 0, 0]; }   // riquadro girato
   const land = vw > vh, aw = vw - (land ? Math.max(l, r) * 2 : 0), ah = vh - (land ? 0 : t + b);
   let w = Math.min(aw, ah * 16 / 9), h = w * 9 / 16; w = Math.floor(w); h = Math.floor(h);
   let left = Math.round((vw - w) / 2), fw = w;
@@ -2943,7 +2971,7 @@ const mqLand = matchMedia("(orientation: landscape)");          // tenuto in una
 let lastLand = mqLand.matches;
 function fsOrient(){                                             // anche con "resize": su alcuni browser il cambio di orientamento non avvisa
   const land = mqLand.matches; if (land === lastLand) return; lastLand = land;
-  if (land) { if (inFull()) fsLand = true; }
+  if (land) { if (inFull()) { fsLand = true; if (document.documentElement.classList.contains("pfs")) safeFit(true); } }
   else if (inFull() && fsLand) { fsLand = false; toggleFull(); }
 }
 mqLand.addEventListener?.("change", fsOrient);
@@ -4537,6 +4565,7 @@ document.addEventListener("change", e => {
   if (id === "o_disc") { S.opt.homeDisc = e.target.checked; save(); S.homeFetch = 0; loadHome(false, true); }
   if (id === "o_browser") { S.opt.browser = e.target.value; save(); }
   if (id === "o_prev") { S.opt.inlinePrev = e.target.checked; save(); if (!e.target.checked) stopPreview(); }
+  if (id === "o_norot") { S.opt.noRotate = e.target.checked; save(); applyRot(); }
   if (id === "o_ytfs") { S.opt.ytFs = e.target.checked; save(); renderSettings(); toast("Vale dal prossimo video che apri"); }
   if (id === "o_hide") { S.opt.hideWatched = e.target.checked; save(); }
   if (id === "o_hsearch") { S.opt.homeSearch = e.target.checked; S.homeFetch = 0; save(); }
@@ -4602,7 +4631,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261104232435";
+const BUILD = "20261108070613";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
