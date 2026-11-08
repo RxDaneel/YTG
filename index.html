@@ -2290,7 +2290,6 @@ function renderSettings(){
     <div class="panel">
       <label class="toggle"><div>Apri i link esterni con<small>Scegli il tuo browser se iOS li apre nel posto sbagliato</small></div>
         <select class="pick" id="o_browser">${Object.entries(BROWSERS).map(([k, n]) => `<option value="${esc(k)}" ${k === (o.browser || "") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-      <label class="toggle"><div>Blocca la rotazione<small>L'app resta in verticale anche se il blocco rotazione dell'iPhone è spento; lo schermo intero gira da solo il video.</small></div><input type="checkbox" class="switch" id="o_norot" ${S.opt.noRotate !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Schermo intero di iOS<small>Accesa: il pulsante di schermo intero del lettore YouTube apre il lettore di sistema di iPhone (doppia barra del volume). Spenta: schermo intero di YTG con il pulsante ⛶ in alto nel player.</small></div><input type="checkbox" class="switch" id="o_ytfs" ${S.opt.ytFs ? "checked" : ""}></label>
       <label class="toggle"><div>Anteprima automatica<small>Il video fermo sullo schermo parte muto nella miniatura (usa dati)</small></div><input type="checkbox" class="switch" id="o_prev" ${o.inlinePrev !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Nascondi video già visti<small>Quelli che hai aperto da qui</small></div><input type="checkbox" class="switch" id="o_hide" ${o.hideWatched ? "checked" : ""}></label>
@@ -2905,7 +2904,7 @@ function applyRot(){
   root.classList.toggle("prot", prot);
   if (prot) { root.style.setProperty("--rw", innerHeight + "px"); root.style.setProperty("--rh", innerWidth + "px"); }
   // app bloccata in verticale
-  const lock = phone && land && S.opt.noRotate !== false && !inFull();
+  const lock = false;                       // blocco della rotazione fuori dai video: tolto su richiesta (si vedeva girare e poi raddrizzarsi)
   root.classList.toggle("plock", lock);
   if (lock) {
     root.style.setProperty("--plw", innerHeight + "px"); root.style.setProperty("--plh", innerWidth + "px");
@@ -4631,7 +4630,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261108070613";
+const BUILD = "20261108072514";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
