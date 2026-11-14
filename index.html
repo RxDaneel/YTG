@@ -3445,6 +3445,12 @@ async function rate(kind){
   } catch (e) { myRating = prev; paintRating(); toast("Non riuscito: " + e.message); }
 }
 
+async function shareChannel(){
+  const s = CH.info?.snippet || {}, h = s.customUrl || "";
+  const url = h ? "https://www.youtube.com/" + (h.startsWith("@") ? h : "@" + h) : "https://www.youtube.com/channel/" + CH.id;
+  try { if (navigator.share) { await navigator.share({ title: s.title || "Canale", url }); return; } } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(url); toast("Link copiato"); } catch { toast(url); }
+}
 async function shareVideo(){
   const url = "https://youtu.be/" + current.id;
   try { if (navigator.share) { await navigator.share({ title: current.title, url }); return; } } catch (e) { if (e.name === "AbortError") return; }
@@ -3728,6 +3734,7 @@ function renderChannelHead(){
     ${banner ? `<div class="banner" style="background-image:url('${esc(banner)}=w1060')"></div>` : ""}
     <div class="chead"><img src="${esc(thumb)}" alt=""><div style="min-width:0;flex:1"><h2>${esc(s.title)}</h2><div class="sub">${esc(meta)}</div></div></div>
     <div style="padding:6px 16px 10px"><button class="btn${isSub(CH.id) ? " ghost" : ""}" id="subBtn" data-act="subscribe" style="padding:8px 16px;font-size:13px">${isSub(CH.id) ? "Iscritto ✓" : "Iscriviti"}</button>
+      <button class="more" data-act="chShare" style="margin-left:12px;font-size:13px">Condividi</button>
       <button class="more" data-act="chDiag" style="margin-left:12px;font-size:13px">Controlla il feed</button></div>
     <div id="chDiag"></div>
     ${s.description ? `<div class="cabout" id="cAbout">${esc(s.description)}</div><div style="padding:0 16px"><button class="more" data-act="chAbout">Altro</button></div>` : ""}
@@ -4439,6 +4446,7 @@ document.addEventListener("click", e => {
   if (a === "syncNow") return syncNow(true);
   if (a === "setAdv" || a === "setMain") { SET_ADV = a === "setAdv"; renderSettings(); return toTop(); }
   if (a === "chDiag") return chanDiag();
+  if (a === "chShare") return shareChannel();
   if (a === "syncStart") {
     if (!S.clientId) return toast("Prima configura l'accesso con Google");
     if (!driveOk() && !(S.refresh && (S.grant || "").includes(DRIVE))) return startLogin({ do: "syncOn", tab });
@@ -4602,7 +4610,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261108200813";
+const BUILD = "20261114140312";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
