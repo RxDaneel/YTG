@@ -182,6 +182,9 @@ nav button[aria-current="true"] svg{stroke:var(--fg);stroke-width:2.3}
 .hq svg{width:20px;height:20px;flex:none;stroke:var(--muted);fill:none;stroke-width:1.8;stroke-linecap:round}
 .hq span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hq small{color:var(--muted);font-size:11px;flex:none}
+.hq img.av{width:28px;height:28px;border-radius:50%;object-fit:cover;flex:none;margin:-4px 0;background:var(--raised)}
+.hq img.th{width:50px;height:28px;border-radius:5px;object-fit:cover;flex:none;margin:-4px 0;background:var(--raised)}
+.hq b{font-weight:600}
 .hx{border:0;background:none;width:44px;height:44px;display:grid;place-items:center;flex:none}
 .hx svg{width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2;stroke-linecap:round}
 .lnk{color:#065fd4;text-decoration:none;word-break:break-all}
@@ -2122,6 +2125,41 @@ function addSearchHist(q){
   S.sHist = [q].concat((S.sHist || []).filter(x => x.toLowerCase() !== q.toLowerCase())).slice(0, 30); save();
 }
 const ICON_CLOCK = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+/* Suggerimenti mentre scrivi: tutti calcolati sul dispositivo (0 unità).
+   Canali (quelli che segui prima), completamenti della parola che stai scrivendo e video che YTG conosce già. */
+const ICON_SEARCH = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+function suggestHTML(typed){
+  const q = normTxt(typed).replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (q.length < 2) return "";
+  const ws = q.split(" "), last = ws[ws.length - 1], head = ws.slice(0, -1);
+  const words = t => normTxt(t || "").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+  // ogni parola scritta deve essere l'inizio di una parola del testo (l'ultima può essere a metà)
+  const hits = t => { const tw = words(t), j = tw.join(" "); return ws.every((w, i) => tw.some(x => x.startsWith(w)) || (i === ws.length - 1 && j.includes(w))); };
+  const bold = t => { const i = normTxt(t).indexOf(ws[0]); return i < 0 ? esc(t) : esc(t.slice(0, i)) + "<b>" + esc(t.slice(i, i + ws[0].length)) + "</b>" + esc(t.slice(i + ws[0].length)); };
+  // canali
+  const chs = new Map();
+  const addCh = (id, title, thumb, w) => { if (!id || !title || !hits(title)) return; const o = chs.get(id); const sc = w + (normTxt(title).startsWith(q) ? 3 : 0); if (!o || o.sc < sc) chs.set(id, { id, title, thumb, sc }); };
+  for (const c of S.channels) addCh(c.id, c.title, c.thumb, 5);
+  for (const e of Object.values(S.chSearch || {})) for (const c of e.list || []) addCh(c.id, c.title, c.thumb, 2);
+  for (const v of CACHE.values()) addCh(v.ch, v.chTitle, "", 1);
+  const chList = [...chs.values()].sort((a, b) => b.sc - a.sc || a.title.length - b.title.length).slice(0, 4);
+  // completamenti: la parola a metà viene completata con le parole più usate in titoli, canali e ricerche
+  const voc = searchVocab(), comp = [];
+  if (last.length >= 2) for (const [w, n] of voc) if (w.startsWith(last) && w !== last) comp.push([w, n]);
+  comp.sort((a, b) => b[1] - a[1]);
+  const queries = [];
+  const addQ = t => { t = t.trim(); if (t && t !== q && !queries.includes(t) && !(S.sHist || []).some(h => normTxt(h) === t)) queries.push(t); };
+  for (const c of chList) addQ(normTxt(c.title));
+  for (const [w] of comp.slice(0, 6)) addQ([...head, w].join(" "));
+  // video già noti
+  const vids = []; const seen = new Set();
+  for (const v of [...S.videos, ...CACHE.values()]) { if (vids.length >= 3) break; if (!v?.id || seen.has(v.id) || !v.title) continue; seen.add(v.id); if (hits(v.title)) vids.push(v); }
+  const out = [];
+  for (const c of chList) out.push(`<div class="hitem"><button class="hq" data-ch="${esc(c.id)}"><img class="av" src="${esc(c.thumb || avatarOf(c.id, c.title))}" alt=""><span>${bold(c.title)}</span><small>${isSub(c.id) ? "iscritto" : "canale"}</small></button></div>`);
+  for (const t of queries.slice(0, 5)) out.push(`<div class="hitem"><button class="hq" data-hq="${esc(t)}">${ICON_SEARCH}<span>${bold(t)}</span></button></div>`);
+  for (const v of vids) out.push(`<div class="hitem"><button class="hq" data-v="${esc(v.id)}"><img class="th" src="${esc(thumbOf(v))}" alt=""><span>${bold(v.title)}</span><small>video</small></button></div>`);
+  return out.length ? `<div class="shist" style="padding-bottom:0">${out.join("")}</div>` : "";
+}
 function histHTML(filter){
   const f = (filter || "").trim().toLowerCase();
   const items = (S.sHist || []).filter(q => !f || q.toLowerCase().includes(f)).slice(0, 15);
@@ -2141,7 +2179,8 @@ function renderSearch(){
   const paste = `<button class="more" data-act="pasteLink" style="display:flex;align-items:center;gap:10px;padding:12px 16px 4px"><svg viewBox="0 0 24 24" width="18" height="18" style="stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Apri un link di YouTube copiato</button>`;
   const typed = sFocus ? ($("#sIn").value || "").trim() : "", sug = typed.length > 2 ? correctQuery(typed) : null;
   const sugRow = sug ? `<div class="hitem"><button class="hq" data-hq="${esc(sug)}" data-hqfix="1"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Forse cercavi: <b>${esc(sug)}</b></span></button></div>` : "";
-  if (sugRow && !searchBusy) { r.innerHTML = paste + sugRow + hist; return; }
+  const live = typed && !searchBusy ? suggestHTML(typed) : "";
+  if ((sugRow || live) && !searchBusy) { r.innerHTML = paste + sugRow + live + hist; return; }
   if (hist && !searchBusy) { r.innerHTML = paste + hist; return; }
   if (!searchQ && !searchBusy) { r.innerHTML = paste + `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).<br>Se incolli qui il link di un video, si apre direttamente.</p></div>`; return; }
   const ytBtn = `<div style="padding:12px 16px 16px">${quotaOut() ? `<div class="help" style="padding:0">Unità finite per oggi: cerco solo tra i video già noti.</div>` : `<button class="btn" data-act="searchYT">Riprova su YouTube</button>`}</div>`;
@@ -4610,7 +4649,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261114140312";
+const BUILD = "20261114143215";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
