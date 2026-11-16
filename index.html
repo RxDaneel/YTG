@@ -583,7 +583,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(LS)) || {}; } catc
 
 /* Le liste grandi (video, avatar, cache) vanno in IndexedDB: localStorage su iPhone tiene circa 5 MB,
    e se si riempie l'app "dimentica" tutto e riscarica ogni volta, consumando unità. */
-const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats", "peers", "imp"];
+const BIG = ["videos", "home", "avatars", "chMeta", "sCache", "relCache", "meData", "later", "homeSeen", "pos", "chap", "marks", "stats", "peers", "imp", "net"];
 let idb = null, bigReady = false, saveT = 0, resetting = false;
 function idbOpen(){
   return new Promise(res => {
@@ -1370,6 +1370,84 @@ async function channelLatest(id){
   const list = await withDetails((j.items || []).map(fromPlaylistItem).filter(Boolean), false);
   rc[key] = { at: Date.now(), list }; save(); return list;
 }
+/* ---------- N) rete dei canali consigliati dai tuoi creator ----------
+   Ogni canale può mostrare nella sua pagina una sezione "canali consigliati": sono scelti da persone, non da ricerche.
+   Una volta al giorno leggo quella sezione per tutti i canali che segui (1 unità a canale), sommo i "voti"
+   (pesati da quanto guardi chi li consiglia) e dei canali più votati prendo i video più visti di sempre (UULP).
+   Si aggiunge una ricerca al giorno dei video più visti dell'ultimo anno su uno dei tuoi temi. */
+let netBusy = false;
+function netState(){ return S.net || (S.net = { at: 0, feat: {}, ch: {} }); }
+async function refreshNetwork(force){
+  const N = netState();
+  if (netBusy || !S.key || quotaOut() || (!force && Date.now() - N.at < 20 * 3600000)) return false;
+  netBusy = true;
+  try {
+    const subs = S.channels.map(c => c.id), feat = {};
+    // 1) canali consigliati da ciascun canale che segui (8 alla volta)
+    for (let i = 0; i < subs.length; i += 8) {
+      await Promise.all(subs.slice(i, i + 8).map(async id => {
+        try {
+          const j = await api("channelSections", { part: "snippet,contentDetails", channelId: id });
+          const ids = [];
+          for (const sec of j.items || []) if (/multiplechannels/i.test(sec.snippet?.type || "")) for (const c of sec.contentDetails?.channels || []) ids.push(c);
+          feat[id] = [...new Set(ids)].slice(0, 30);
+        } catch (e) { if (e.reason === "quotaExceeded") throw e; feat[id] = N.feat[id] || []; }
+      }));
+    }
+    N.feat = feat;
+    // 2) voti: chi consiglia pesa di più se lo guardi spesso; contano anche i canali consigliati dai canali scoperti che guardi
+    const T = taste(), votes = {};
+    const vote = (from, to, w) => { if (!to || isSub(to) || S.blocked[to] || to === from) return; const o = votes[to] || (votes[to] = { w: 0, from: [] }); o.w += w; if (o.from.length < 5) o.from.push(from); };
+    for (const [from, list] of Object.entries(feat)) { const w = 1 + Math.max(0, chScore(T, from)) * .5; list.forEach(to => vote(from, to, w)); }
+    const cand = Object.entries(votes).sort((a, b) => b[1].w - a[1].w).slice(0, 150).map(x => x[0]);
+    // 3) dettagli dei candidati (50 per unità): niente canali per bambini, lingua, dimensioni
+    const info = {};
+    for (let i = 0; i < cand.length; i += 50) {
+      try {
+        const j = await api("channels", { part: "snippet,statistics,status", id: cand.slice(i, i + 50).join(",") });
+        for (const c of j.items || []) info[c.id] = c;
+      } catch (e) { if (e.reason === "quotaExceeded") throw e; }
+    }
+    const ch = {};
+    for (const id of cand) {
+      const c = info[id]; if (!c || c.status?.madeForKids) continue;
+      const lang = (c.snippet.defaultLanguage || c.snippet.country || "").toLowerCase();
+      if (lang && !/^(it|en|us|gb|ca|au|ie|ch)/.test(lang)) continue;     // italiano o inglese
+      if (KIDS_RE.test(c.snippet.title + " " + (c.snippet.description || "").slice(0, 300))) continue;
+      ch[id] = { t: c.snippet.title, th: c.snippet.thumbnails?.default?.url || "", subs: +c.statistics?.subscriberCount || 0, n: +c.statistics?.videoCount || 0, w: votes[id].w, from: votes[id].from };
+      if (ch[id].th && !S.avatars[id]) S.avatars[id] = ch[id].th;
+    }
+    N.ch = ch; N.at = Date.now(); save();
+    // 4) i video più visti dei 40 canali più votati (2 unità a canale, salvati 7 giorni)
+    await fetchNetPopular(40);
+    return true;
+  } catch (e) { if (e.reason !== "quotaExceeded") console.warn(e); return false; }
+  finally { netBusy = false; }
+}
+function netChannels(){
+  const T = taste(), N = netState();
+  return Object.entries(N.ch).filter(([id]) => !isSub(id) && !S.blocked[id] && (T.ch[id] || 0) > -3 && (T.ctr[id] || 0) > -1.5)
+    .map(([id, c]) => [id, c.w * (1 + Math.max(-.8, chScore(T, id) * .3))]).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+async function fetchNetPopular(n){
+  const todo = netChannels().filter(id => !(S.relCache["pop:" + id] && Date.now() - S.relCache["pop:" + id].at < 7 * 864e5)).slice(0, n);
+  for (let i = 0; i < todo.length; i += 8) await Promise.all(todo.slice(i, i + 8).map(id => channelPopular(id).catch(() => [])));
+}
+function netPool(p, skip){
+  const T = taste(), N = netState(), out = [], now = Date.now(), seen = new Set();
+  const order = netChannels(), rank = new Map(order.map((id, i) => [id, i]));
+  for (const id of order) { const c = S.relCache["pop:" + id]; if (c) c.list.forEach(v => out.push(v)); }
+  for (const l of Object.keys(S.sCache).filter(k => k.startsWith("hv:")).map(k => S.sCache[k].list || [])) l.forEach(v => out.push(v));
+  return remember(out.filter(v => v && homeOk(v, p) && freshOk(v) && !isKids(v) && !skip?.has(v.id) && !seen.has(v.id) && seen.add(v.id))).map(v => {
+    const c = N.ch[v.ch], days = (now - Date.parse(v.at)) / 864e5;
+    let s = (c ? Math.log2(1 + c.w) * 1.5 : 1) + chScore(T, v.ch) + videoBonus(T, v) + Math.log10(1 + (v.views || 0)) * .45;
+    s -= (rank.get(v.ch) ?? 60) / 60;                               // i canali più votati prima
+    if (days > 5 * 365) s -= 1;                                      // molto vecchi: un po' meno
+    s += Math.min(3, relevance(v, interestVocab()) * .15);           // vicino ai tuoi temi: un po' di più
+    s += -(S.homeSeen[v.id] || 0) * .6 + Math.random() * 2;
+    return [s, v];
+  }).sort((x, y) => y[0] - x[0]).map(x => x[1]);
+}
 /* Home, come quella di YouTube:
    S) video dei canali a cui sei iscritto che non hai ancora visto (gratis: sono già scaricati), prima i canali che guardi di più e i più recenti;
    P) i video più visti dei tuoi canali che non hai visto, e gli ultimi dei canali che guardi senza esserci iscritto (2 unità per canale, salvati 7 giorni);
@@ -1522,16 +1600,19 @@ function popPool(p, skip){
 function pruneRel(){ const rc = S.relCache; for (const k of Object.keys(rc)) if (Date.now() - rc[k].at > (k.startsWith("pop:") ? 8 * 864e5 : 48 * 3600000)) delete rc[k]; }
 const DISC_MIN = 6;                      // pertinenza minima per un video da un canale che non segui
 function mixHome(pools, max){
-  const pat = S.opt.homeDisc === false ? "SSPSSSSPSS" : "SDSPSDSPSD", have = new Set(S.home.map(v => v.id)), total = {};
-  const L = { S: (pools.S || []).slice(), P: (pools.P || []).slice(), D: (pools.D || []).slice() };
+  // 10 video: 5 dai tuoi canali (S), 1 più visto dei tuoi (P), 3 dalla rete di canali consigliati (N), 1 dalle ricerche sui temi (D)
+  const pat = S.opt.homeDisc === false ? "SSPSSSSPSS" : "SNSPSNSDSN", have = new Set(S.home.map(v => v.id)), total = {};
+  const L = { S: (pools.S || []).slice(), P: (pools.P || []).slice(), D: (pools.D || []).slice(), N: (pools.N || []).slice() };
   S.home.forEach(v => total[v.ch] = (total[v.ch] || 0) + 1);
-  const cap = v => isSub(v.ch) ? 99 : 3;                                   // canali che non segui: massimo 3 video
+  const cap = v => isSub(v.ch) ? 99 : 1;                                   // canali che non segui: un solo video
   const spaced = v => { const w = S.home.slice(-10); return w[w.length - 1]?.ch !== v.ch && w.filter(x => x.ch === v.ch).length < 2; };
   const next = (k, relaxed) => {
     const l = L[k];
     for (let j = 0; j < l.length; j++) {
       const v = l[j];
       if (have.has(v.id) || (total[v.ch] || 0) >= cap(v)) { l.splice(j--, 1); continue; }
+      // temi alternati: un video di scoperta non segue uno della stessa categoria
+      if (!relaxed && (k === "N" || k === "D") && v.cat && S.home[S.home.length - 1]?.cat === v.cat && j < Math.min(l.length - 1, 3)) continue;   // solo tra i primi candidati
       if (relaxed || spaced(v)) { l.splice(j, 1); return v; }
     }
     return null;
@@ -1539,8 +1620,8 @@ function mixHome(pools, max){
   let i = S.home.length, added = 0;
   while (S.home.length < max) {
     let v = next(pat[i % pat.length]);
-    if (!v) for (const k of "SPD") if ((v = next(k))) break;
-    if (!v) for (const k of "SPD") if ((v = next(k, true))) break;
+    if (!v) for (const k of "NSPD") if ((v = next(k))) break;
+    if (!v) for (const k of "NSPD") if ((v = next(k, true))) break;
     if (!v) break;
     total[v.ch] = (total[v.ch] || 0) + 1; have.add(v.id); S.home.push(v); added++; i++;
   }
@@ -1567,6 +1648,12 @@ async function loadHome(manual, noFetch, auto){
         try { await searchVideos(t, 50, { ...extra, relevanceLanguage: topicLang(t) }, "h:"); fetched++; } catch (e) { if (e.reason === "quotaExceeded") break; }
       }
       for (const t of T) { const c = searchCached(t, "h:"); if (c) lists.push(c.map((v, i) => [v, 3 - i / 20])); }
+      // una volta al giorno: i video più visti dell'ultimo anno su uno dei temi (senza tempo, come su YouTube)
+      if (!noFetch && !quotaOut() && S.opt.homeDisc !== false) {
+        const day = Math.floor(Date.now() / 864e5), tv = T[day % n];
+        if (!searchCached(tv, "hv:")) { const y = new Date(Date.now() - 365 * 864e5); y.setUTCHours(0, 0, 0, 0);
+          try { await searchVideos(tv, 50, { publishedAfter: y.toISOString(), order: "viewCount", relevanceLanguage: topicLang(tv) }, "hv:"); } catch (e) { if (e.reason === "quotaExceeded") throw e; } }
+      }
       S.homeMode = "foryou"; S.homeTags = T.slice(0, 8);
     }
     if (!noFetch && !quotaOut()) {
@@ -1579,8 +1666,13 @@ async function loadHome(manual, noFetch, auto){
       await Promise.all([...new Set(pick.concat(disc))].map(id => channelLatest(id).catch(() => [])));
     }
     for (const id of discoveryChannels(p, T)) { const c = S.relCache["ch:" + id]; if (c) lists.push(c.list.map(v => [v, 1.5])); }
-    const pools = { S: subsPool(), P: popPool(p), D: S.opt.homeDisc === false ? [] : rankHome(lists, p, null, DISC_MIN) };
-    if (!pools.S.length && !pools.P.length && !pools.D.length) {   // nessuna iscrizione né tema: classifiche, come all'inizio
+    // rete dei canali consigliati: una volta al giorno (la prima volta può richiedere qualche secondo)
+    if (!noFetch && S.opt.homeDisc !== false && Date.now() - netState().at > 20 * 3600000)
+      refreshNetwork().then(ok => { if (ok) loadHome(false, true); });   // in sottofondo: quando ha finito ricompone la Home
+    else if (!noFetch && S.opt.homeDisc !== false && !quotaOut()) await fetchNetPopular(auto ? 6 : 12);
+    const disc = S.opt.homeDisc !== false;
+    const pools = { S: subsPool(), P: popPool(p), D: disc ? rankHome(lists, p, null, DISC_MIN) : [], N: disc ? netPool(p) : [] };
+    if (!pools.S.length && !pools.P.length && !pools.D.length && !pools.N.length) {   // nessuna iscrizione né tema: classifiche, come all'inizio
       const cs = cats.length ? cats : [""], ch = [];
       for (const l of await Promise.all(cs.map(c => chartPage(c, S.homePage[c || "all"] || 0, false).catch(() => [])))) ch.push(l.map(v => [v, 0]));
       pools.D = rankHome(ch, p); S.homeMode = T.length || cats.length ? "foryou" : "trend"; if (!T.length) S.homeTags = cats.map(c => CATS[c]);
@@ -1712,7 +1804,9 @@ async function moreHome(){
     }
     const lists = discoveryChannels(p, T).map(id => S.relCache["ch:" + id]).filter(Boolean).map(c => c.list.map(v => [v, 1.5]));
     for (const t of T) { const c = searchCached(t, "h:"); if (c) lists.push(c.map((v, i) => [v, 3 - i / 20])); }
-    const added = mixHome({ S: subsPool(have), P: popPool(p, have), D: S.opt.homeDisc === false ? [] : rankHome(lists, p, have, DISC_MIN) }, S.home.length + 60);
+    if (!quotaOut() && S.opt.homeDisc !== false) await fetchNetPopular(8);                  // altri canali della rete
+    const disc = S.opt.homeDisc !== false;
+    const added = mixHome({ S: subsPool(have), P: popPool(p, have), D: disc ? rankHome(lists, p, have, DISC_MIN) : [], N: disc ? netPool(p, have) : [] }, S.home.length + 60);
     if (!added) homeMoreEnd = true;
     homeShow += 20; save(); ensureAvatars(S.home);
   } catch (e) { toast(errMsg(e)); }
@@ -1745,6 +1839,7 @@ function whyList(v){
   const T = taste(), r = [], name = `<b>${esc(v.chTitle || "questo canale")}</b>`, sub = isSub(v.ch), cw = T.ch[v.ch] || 0;
   if (sub) r.push(`Sei iscritto a ${name}`);
   else if (cw >= 4) r.push(`Guardi i video di ${name} anche se non sei iscritto`);
+  else if (S.net?.ch?.[v.ch]) { const f = S.net.ch[v.ch].from.map(id => subMap().get(id)?.title).filter(Boolean).slice(0, 3); r.push(`${name} è consigliato da canali che segui${f.length ? ": " + f.map(esc).join(", ") : ""}`); }
   else r.push(`${name} è un canale che non segui, scelto perché parla dei temi dei creator che segui`);
   const e = T.chEv[v.ch];
   if (e?.n) r.push(`Hai aperto ${e.n} suo${e.n === 1 ? "" : "i"} video ${e.f / e.n >= 2 ? "e di solito li guardi fino in fondo" : e.f / e.n >= 1 ? "e ne guardi una buona parte" : e.f / e.n < 0 ? "ma di solito li chiudi presto: per questo ne vedi meno" : ""}`.trim());
@@ -2266,7 +2361,7 @@ function themePicker(){
 }
 /* ---------- backup ----------
    Tutto quello che sta solo su questo telefono. Restano fuori l'accesso a Google (si rifà) e le cache che si riscaricano. */
-const BK_SKIP = new Set(["authServer", "oauthState", "__proto__", "constructor", "prototype", "imp", "devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
+const BK_SKIP = new Set(["net", "authServer", "oauthState", "__proto__", "constructor", "prototype", "imp", "devId", "peers", "syncFile", "syncVer", "syncHash", "syncAt", "grant", "refresh", "token", "tokenExp", "tokenScope", "silentFail", "sCache", "relCache", "home", "homeFetch", "homeMode", "meData", "qDay", "qUsed", "quotaOut", "lastFail", "lastBackup"]);
 function exportBackup(){
   const data = {}; for (const k in S) if (!BK_SKIP.has(k)) data[k] = S[k];
   const now = new Date(), name = `YTG-backup-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.json`;
@@ -2320,7 +2415,7 @@ function renderSettings(){
     <h2 style="margin-top:22px">Home</h2>
     <div class="panel">
       <label class="toggle"><div>Mostra la Home<small>Spegnila per vedere solo le iscrizioni.</small></div><input type="checkbox" class="switch" id="o_home" ${o.showHome ? "checked" : ""}></label>
-      <label class="toggle"><div>Video da canali che non segui<small>In Home, 3 video ogni 10 da canali nuovi, solo sui temi (tag) dei creator che segui. Spenta: solo canali che segui o guardi.</small></div><input type="checkbox" class="switch" id="o_disc" ${o.homeDisc !== false ? "checked" : ""}></label>
+      <label class="toggle"><div>Video da canali che non segui<small>In Home, 4 video ogni 10 da canali che non segui: quelli consigliati dai tuoi creator e i più visti sui tuoi temi. Spenta: solo canali che segui o guardi.</small></div><input type="checkbox" class="switch" id="o_disc" ${o.homeDisc !== false ? "checked" : ""}></label>
       <label class="toggle"><div>Home sui tuoi interessi<small>Cerca video sui temi delle tue iscrizioni. Circa 100 unità quando la aggiorni; spenta usa le classifiche di YouTube (0–3 unità).</small></div><input type="checkbox" class="switch" id="o_hsearch" ${o.homeSearch ? "checked" : ""}></label>
       ${S.mutedTopics.length ? `<button class="toggle" style="width:100%;border:0;border-top:1px solid var(--line);background:none;text-align:left" data-act="unmuteAll">Temi tolti dalla Home: ${esc(S.mutedTopics.join(", "))}<small>Tocca per rimetterli tutti</small></button>` : ""}
       <label class="toggle"><div>Paese della Home e della ricerca</div>
@@ -4658,7 +4753,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261115091703";
+const BUILD = "20261116191320";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
