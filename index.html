@@ -1964,10 +1964,17 @@ function rankSearch(list, q){
     for (const w of ws) { if (hay.includes(w)) hit++; if (tit.includes(w)) inTitle++; }
     return { v, i, hit, inTitle, ok: hit >= need };
   });
-  const recent = (S.opt.sSort || "recent") === "recent", T = taste();
-  // "Più pertinenti": a parità di parole trovate, prima i tuoi canali, quelli consigliati dalla tua rete e quelli che guardi
-  scored.forEach(x => x.score = x.hit * 3 + x.inTitle * 2 + personalScore(x.v, T) - x.i / 25);
-  const cmp = (a, b) => recent ? b.v.at.localeCompare(a.v.at) : (b.score - a.score);
+  const mode = S.opt.sSort || "auto", T = taste(), now = Date.now();
+  // "Consigliati" come YouTube: parte dall'ordine di YouTube e ci aggiunge popolarità, i tuoi canali e la lingua.
+  // Se l'argomento è "caldo" (molti risultati degli ultimi giorni) i video recenti salgono; se è "senza tempo" contano di più le visualizzazioni.
+  const top = scored.slice(0, 20), hot = top.length ? top.filter(x => now - Date.parse(x.v.at) < 14 * 864e5).length / top.length : 0;
+  scored.forEach(x => {
+    const days = (now - Date.parse(x.v.at)) / 864e5, views = Math.log10(1 + (x.v.views || 0));
+    x.rel = x.hit * 3 + x.inTitle * 2 + personalScore(x.v, T) - x.i / 25;
+    x.auto = (50 - Math.min(50, x.i)) * .25 + x.hit * 2 + x.inTitle * 1.5 + personalScore(x.v, T) * 1.5 + views * (hot > .35 ? .6 : 1.4)
+      + (videoLang(x.v) === "it" ? 1.5 : 0) + (hot > .35 ? (days < 3 ? 5 : days < 14 ? 2.5 : 0) : (days < 30 ? .8 : 0));
+  });
+  const cmp = mode === "recent" ? (a, b) => b.v.at.localeCompare(a.v.at) : mode === "rel" ? (a, b) => b.rel - a.rel : (a, b) => b.auto - a.auto;
   return { good: scored.filter(x => x.ok).sort(cmp).map(x => x.v), weak: scored.filter(x => !x.ok).sort((a, b) => a.i - b.i).map(x => x.v) };
 }
 /* scorrendo in fondo si caricano da soli altri 50 risultati (100 unità ciascuna pagina);
@@ -1985,8 +1992,9 @@ async function moreSearch(auto){
   finally { sMoreBusy = false; renderSearch(); }
 }
 function searchToolbar(){
-  const sort = S.opt.sSort || "recent";
+  const sort = S.opt.sSort || "auto";
   return `<div class="chips" style="padding-top:8px">
+    <button class="chip chipq${sort === "auto" ? " on" : ""}" data-ssort="auto" style="padding:7px 13px">Consigliati</button>
     <button class="chip chipq${sort === "recent" ? " on" : ""}" data-ssort="recent" style="padding:7px 13px">Più recenti</button>
     <button class="chip chipq${sort === "rel" ? " on" : ""}" data-ssort="rel" style="padding:7px 13px">Più pertinenti</button>
     <span style="width:1px;background:var(--line);margin:4px 2px;flex:none"></span>
@@ -2247,6 +2255,35 @@ const ICON_CLOCK = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><p
 /* Suggerimenti mentre scrivi: tutti calcolati sul dispositivo (0 unità).
    Canali (quelli che segui prima), completamenti della parola che stai scrivendo e video che YTG conosce già. */
 const ICON_SEARCH = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>';
+/* completamenti "come YouTube": cerco le parole scritte nei titoli dei video che YTG conosce (feed, Home, ricerche fatte)
+   e propongo come continuano, ordinate per quante volte compaiono. Esempio: "mig 25" → "mig 25 foxbat". */
+let phraseIdx = null, phraseKey = "";
+function phraseTitles(){
+  const k = S.videos.length + ":" + CACHE.size + ":" + Object.keys(S.sCache).length;
+  if (phraseIdx && phraseKey === k) return phraseIdx;
+  const seen = new Set(), out = [];
+  const add = v => { if (!v?.title || seen.has(v.id)) return; seen.add(v.id); out.push(normTxt(v.title).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean)); };
+  S.videos.forEach(add); CACHE.forEach(add); Object.values(S.sCache).forEach(e => (e.list || []).forEach(add));
+  phraseIdx = out; phraseKey = k; return out;
+}
+function phraseCompletions(ws){
+  if (!ws.length || ws.join(" ").length < 3) return [];
+  const last = ws[ws.length - 1], cnt = new Map();
+  for (const t of phraseTitles()) {
+    for (let i = 0; i + ws.length <= t.length; i++) {
+      let ok = true;
+      for (let j = 0; j < ws.length && ok; j++) ok = j < ws.length - 1 ? t[i + j] === ws[j] : t[i + j].startsWith(last);
+      if (!ok) continue;
+      const end = i + ws.length, nxt = t[end], base = t.slice(i, end);
+      const cands = [];
+      if (base[base.length - 1] !== last) cands.push(base.join(" "));                 // completa la parola a metà
+      if (nxt && nxt.length > 1 && !STOPW.has(nxt)) cands.push(base.concat(nxt).join(" "));   // aggiunge la parola dopo
+      else if (nxt && t[end + 1] && !STOPW.has(t[end + 1])) cands.push(base.concat(nxt, t[end + 1]).join(" "));
+      for (const c of cands) cnt.set(c, (cnt.get(c) || 0) + 1);
+    }
+  }
+  return [...cnt].filter(([c, n]) => n >= (c.split(" ").length > ws.length ? 2 : 1)).sort((a, b) => b[1] - a[1]).slice(0, 4).map(x => x[0]);
+}
 function suggestHTML(typed){
   const q = normTxt(typed).replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   if (q.length < 2) return "";
@@ -2269,6 +2306,7 @@ function suggestHTML(typed){
   comp.sort((a, b) => b[1] - a[1]);
   const queries = [];
   const addQ = t => { t = t.trim(); if (t && t !== q && !queries.includes(t) && !(S.sHist || []).some(h => normTxt(h) === t)) queries.push(t); };
+  for (const p of phraseCompletions(ws)) addQ(p);
   for (const c of chList) addQ(normTxt(c.title));
   for (const [w] of comp.slice(0, 6)) addQ([...head, w].join(" "));
   // video già noti
@@ -2379,6 +2417,7 @@ function applyCols(){
   if (n) { r.dataset.cols = n; r.style.setProperty("--cols", n); } else { delete r.dataset.cols; r.style.removeProperty("--cols"); }
 }
 applyCols();
+if (!S.opt.sSort2) { S.opt.sSort = "auto"; S.opt.sSort2 = 1; }      // nuovo ordine predefinito della ricerca: Consigliati
 function themePicker(){
   const cur = S.opt.theme;
   return `<div class="panel"><div class="themes">${Object.entries(THEMES).map(([k, t]) => `<button data-theme-pick="${esc(k)}" aria-pressed="${k === cur}">
@@ -4778,7 +4817,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261116193436";
+const BUILD = "20261116194745";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
