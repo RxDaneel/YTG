@@ -1951,7 +1951,7 @@ function mineForQuery(q, results){
   const hit = v => { const h = normTxt(v.title + " " + (v.tags || []).join(" ") + " " + (v.chTitle || "")); return ws.every(w => h.includes(w)); };
   const net = id => !!S.net?.ch?.[id];
   const pool = [...(results || []).filter(v => isSub(v.ch) || net(v.ch)), ...S.videos, ...Object.keys(S.net?.ch || {}).flatMap(id => S.relCache["pop:" + id]?.list || [])];
-  for (const v of pool) { if (!v?.id || seen.has(v.id) || !langOk(v) || isKids(v)) continue; seen.add(v.id); if (hit(v)) out.push(v); }
+  for (const v of pool) { if (!v?.id || seen.has(v.id) || (!isSub(v.ch) && !langOk(v)) || isKids(v)) continue; seen.add(v.id); if (hit(v)) out.push(v); }
   return remember(out.map(v => [personalScore(v, T) + (Date.now() - Date.parse(v.at) < 30 * 864e5 ? 1 : 0), v]).sort((a, b) => b[0] - a[0]).slice(0, 4).map(x => x[1]));
 }
 function rankSearch(list, q){
@@ -4778,7 +4778,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261116193402";
+const BUILD = "20261116193436";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
