@@ -1938,6 +1938,22 @@ let sRange = "", sRangeYT = "";
 const RANGES = { "": "Sempre", w: "Settimana", m: "Mese", y: "Anno" };
 const rangeFrom = r => new Date(Date.now() - ({ w: 7, m: 31, y: 366 }[r] || 0) * 864e5).toISOString();
 const normTxt = t => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+/* quanto un canale è "tuo": iscritto, consigliato dalla rete dei tuoi creator, guardato spesso; meno se lo salti */
+function personalScore(v, T){
+  const n = S.net?.ch?.[v.ch];
+  return (isSub(v.ch) ? 2 : 0) + (n ? Math.min(2, Math.log2(1 + n.w)) : 0) + Math.max(-2, Math.min(3, chScore(T, v.ch) * .5)) - (S.watched[v.id] ? .5 : 0);
+}
+/* in cima alla ricerca: video dei tuoi canali e di quelli consigliati dai tuoi creator che parlano di quello che cerchi (0 unità) */
+function mineForQuery(q, results){
+  const ws = [...new Set(normTxt(q).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 1 && !STOPW.has(w)))];
+  if (!ws.length) return [];
+  const T = taste(), seen = new Set(), out = [];
+  const hit = v => { const h = normTxt(v.title + " " + (v.tags || []).join(" ") + " " + (v.chTitle || "")); return ws.every(w => h.includes(w)); };
+  const net = id => !!S.net?.ch?.[id];
+  const pool = [...(results || []).filter(v => isSub(v.ch) || net(v.ch)), ...S.videos, ...Object.keys(S.net?.ch || {}).flatMap(id => S.relCache["pop:" + id]?.list || [])];
+  for (const v of pool) { if (!v?.id || seen.has(v.id) || !langOk(v) || isKids(v)) continue; seen.add(v.id); if (hit(v)) out.push(v); }
+  return remember(out.map(v => [personalScore(v, T) + (Date.now() - Date.parse(v.at) < 30 * 864e5 ? 1 : 0), v]).sort((a, b) => b[0] - a[0]).slice(0, 4).map(x => x[1]));
+}
 function rankSearch(list, q){
   const ws = [...new Set(normTxt(q).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 1 && !STOPW.has(w)))];
   const need = ws.length ? Math.max(1, Math.ceil(ws.length * .5)) : 0, since = sRange ? Date.parse(rangeFrom(sRange)) : 0;
@@ -1948,8 +1964,10 @@ function rankSearch(list, q){
     for (const w of ws) { if (hay.includes(w)) hit++; if (tit.includes(w)) inTitle++; }
     return { v, i, hit, inTitle, ok: hit >= need };
   });
-  const recent = (S.opt.sSort || "recent") === "recent";
-  const cmp = (a, b) => recent ? b.v.at.localeCompare(a.v.at) : (b.hit - a.hit) || (b.inTitle - a.inTitle) || (a.i - b.i);
+  const recent = (S.opt.sSort || "recent") === "recent", T = taste();
+  // "Più pertinenti": a parità di parole trovate, prima i tuoi canali, quelli consigliati dalla tua rete e quelli che guardi
+  scored.forEach(x => x.score = x.hit * 3 + x.inTitle * 2 + personalScore(x.v, T) - x.i / 25);
+  const cmp = (a, b) => recent ? b.v.at.localeCompare(a.v.at) : (b.score - a.score);
   return { good: scored.filter(x => x.ok).sort(cmp).map(x => x.v), weak: scored.filter(x => !x.ok).sort((a, b) => a.i - b.i).map(x => x.v) };
 }
 /* scorrendo in fondo si caricano da soli altri 50 risultati (100 unità ciascuna pagina);
@@ -2000,8 +2018,11 @@ let searchCh = [];
 const chWords = q => normTxt(q).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 1);
 function localChannels(q){
   const ws = chWords(q); if (!ws.length) return [];
-  return S.channels.filter(c => { const t = normTxt(c.title); return ws.every(w => t.includes(w)); })
-    .map(c => ({ id: c.id, title: c.title, thumb: c.thumb || avatarOf(c.id, c.title), sub: true })).slice(0, 4);
+  const subs = S.channels.filter(c => { const t = normTxt(c.title); return ws.every(w => t.includes(w)); })
+    .map(c => ({ id: c.id, title: c.title, thumb: c.thumb || avatarOf(c.id, c.title), sub: true }));
+  const net = Object.entries(S.net?.ch || {}).filter(([, c]) => { const t = normTxt(c.t); return ws.every(w => t.includes(w)); })
+    .sort((a, b) => b[1].w - a[1].w).map(([id, c]) => ({ id, title: c.t, thumb: c.th || avatarOf(id, c.t), subs: c.subs, n: c.n, net: true }));
+  return subs.concat(net).slice(0, 4);
 }
 async function searchChannels(q){
   const C = S.chSearch || (S.chSearch = {}), k = normTxt(q).trim();
@@ -2028,7 +2049,7 @@ function channelRows(){
   return `<div class="group">Canali</div>` + searchCh.map(c => `<button class="row" data-ch="${esc(c.id)}" style="align-items:center">
       <div style="width:120px;flex:none;display:grid;place-items:center"><img src="${esc(c.thumb || avatarOf(c.id, c.title))}" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:var(--raised)"></div>
       <div style="min-width:0"><div class="title">${esc(c.title)}</div><div class="sub">${esc([c.handle, c.subs ? subs(c.subs) : "", c.n ? c.n.toLocaleString("it-IT") + " video" : ""].filter(Boolean).join(" · "))}</div>
-        ${c.sub || isSub(c.id) ? `<div class="sub" style="margin-top:2px">Iscritto ✓</div>` : ""}</div></button>`).join("") + `<div class="group">Video</div>`;
+        ${c.sub || isSub(c.id) ? `<div class="sub" style="margin-top:2px">Iscritto ✓</div>` : c.net || S.net?.ch?.[c.id] ? `<div class="sub" style="margin-top:2px">Consigliato dai tuoi canali</div>` : ""}</div></button>`).join("") + `<div class="group">Video</div>`;
 }
 async function doSearchYT(){
   if (!S.key) { toast("Aggiungi prima la chiave API"); return go("vSettings"); }
@@ -2238,6 +2259,7 @@ function suggestHTML(typed){
   const chs = new Map();
   const addCh = (id, title, thumb, w) => { if (!id || !title || !hits(title)) return; const o = chs.get(id); const sc = w + (normTxt(title).startsWith(q) ? 3 : 0); if (!o || o.sc < sc) chs.set(id, { id, title, thumb, sc }); };
   for (const c of S.channels) addCh(c.id, c.title, c.thumb, 5);
+  for (const [id, c] of Object.entries(S.net?.ch || {})) addCh(id, c.t, c.th, 3);
   for (const e of Object.values(S.chSearch || {})) for (const c of e.list || []) addCh(c.id, c.title, c.thumb, 2);
   for (const v of CACHE.values()) addCh(v.ch, v.chTitle, "", 1);
   const chList = [...chs.values()].sort((a, b) => b.sc - a.sc || a.title.length - b.title.length).slice(0, 4);
@@ -2253,7 +2275,7 @@ function suggestHTML(typed){
   const vids = []; const seen = new Set();
   for (const v of [...S.videos, ...CACHE.values()]) { if (vids.length >= 3) break; if (!v?.id || seen.has(v.id) || !v.title) continue; seen.add(v.id); if (hits(v.title)) vids.push(v); }
   const out = [];
-  for (const c of chList) out.push(`<div class="hitem"><button class="hq" data-ch="${esc(c.id)}"><img class="av" src="${esc(c.thumb || avatarOf(c.id, c.title))}" alt=""><span>${bold(c.title)}</span><small>${isSub(c.id) ? "iscritto" : "canale"}</small></button></div>`);
+  for (const c of chList) out.push(`<div class="hitem"><button class="hq" data-ch="${esc(c.id)}"><img class="av" src="${esc(c.thumb || avatarOf(c.id, c.title))}" alt=""><span>${bold(c.title)}</span><small>${isSub(c.id) ? "iscritto" : S.net?.ch?.[c.id] ? "consigliato" : "canale"}</small></button></div>`);
   for (const t of queries.slice(0, 5)) out.push(`<div class="hitem"><button class="hq" data-hq="${esc(t)}">${ICON_SEARCH}<span>${bold(t)}</span></button></div>`);
   for (const v of vids) out.push(`<div class="hitem"><button class="hq" data-v="${esc(v.id)}"><img class="th" src="${esc(thumbOf(v))}" alt=""><span>${bold(v.title)}</span><small>video</small></button></div>`);
   return out.length ? `<div class="shist" style="padding-bottom:0">${out.join("")}</div>` : "";
@@ -2303,7 +2325,10 @@ function renderSearch(){
     const few = sRange && sRange !== sRangeYT && good.length < 8 && !quotaOut()
       ? `<div style="padding:10px 16px 14px"><button class="btn ghost" data-act="searchRange" style="font-size:13px;padding:8px 14px">Cerca su YouTube solo video dell'ultim${sRange === "w" ? "a settimana" : sRange === "m" ? "o mese" : "o anno"} · ${searchCached(searchQ, "p" + sRange + ":") ? "gratis" : "100 unità"}</button></div>` : "";
     const fixNote = "";
-    rr.innerHTML = fixNote + searchToolbar() + channelRows() + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
+    const mine = sRange ? [] : mineForQuery(searchQ, searchRes), mineIds = new Set(mine.map(v => v.id));
+    const mineHTML = mine.length ? `<div class="group">Dai tuoi canali e da quelli consigliati</div>` + mine.map(card).join("") + `<div class="group">Tutti i risultati</div>` : "";
+    good = good.filter(v => !mineIds.has(v.id));
+    rr.innerHTML = fixNote + searchToolbar() + channelRows() + mineHTML + (good.length ? good.map(card).join("") : `<div class="status" style="padding:12px 16px">Nessun risultato pertinente${sRange ? " in questo periodo" : ""}.</div>`) + few
       + (more ? tail : (weak.length ? `<div class="group">Meno pertinenti</div>` + weak.map(card).join("") : ""));
   }
   else rr.innerHTML = `<div class="empty"><p>Cerca su tutto YouTube (100 unità a ricerca; la stessa ricerca entro 24 ore è gratis).</p></div>`;
@@ -4753,7 +4778,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261116191320";
+const BUILD = "20261116193402";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
