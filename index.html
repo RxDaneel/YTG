@@ -419,7 +419,7 @@ select.pick{background:var(--raised);border:0;border-radius:8px;padding:6px 8px;
    con le bande nere ai lati come nell'app di YouTube: niente zoom e niente spostamento verso destra */
 .land #player.open .pwrap{position:fixed;left:0;top:0;width:var(--vw,100vw);height:var(--vh,100vh);overflow:hidden;background:#000}
 .land #player.open .frame{position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;max-width:none;transform:none}
-#ptr{position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
+#ptr{display:none!important;position:fixed;left:50%;top:calc(var(--top) + 58px);z-index:15;width:38px;height:38px;margin-left:-19px;border-radius:50%;
   background:var(--surface);box-shadow:0 2px 10px rgba(0,0,0,.3);display:grid;place-items:center;opacity:0;transform:translateY(-50px);pointer-events:none}
 #ptr svg{width:20px;height:20px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 #ptr.go svg{animation:spin 1s linear infinite}
@@ -2206,10 +2206,10 @@ function renderSubs(){
       ${busy || S.videos.length ? "" : `<div class="row-btns"><button class="btn" data-act="refresh">Carica i video</button></div>`}</div>`;
     return;
   }
-  const sel = (S.groups || []).find(g => g.name === S.subsGroup);
+  const sel = null;
   if (sel) { const ids = new Set(sel.ids); list.splice(0, list.length, ...list.filter(x => ids.has(x.ch))); }
   const shownList = list.slice(0, subsShow);
-  let html = groupChips(sel) + (sel && !list.length ? `<div class="status" style="padding:16px">Nessun video recente dai canali di “${esc(sel.name)}”.</div>` : "");
+  let html = (sel && !list.length ? `<div class="status" style="padding:16px">Nessun video recente dai canali di “${esc(sel.name)}”.</div>` : "");
   html += S.lastFail ? `<button class="more" data-act="refresh" style="display:block;padding:10px 16px 0;color:var(--muted);font-weight:500;font-size:12px;text-align:left">
       ${S.lastFail.n} ${S.lastFail.n === 1 ? "canale non aggiornato" : "canali non aggiornati"} · tocca per riprovare</button>` : "";
   let last = "";
@@ -4817,7 +4817,7 @@ $("#nClose").onclick = () => closeSheet("#notifs");
 /* ---------- aggiornamenti automatici dell'app ----------
    GitHub Pages e Safari tengono in memoria la versione vecchia per qualche minuto:
    se version.json dice che ne esiste una più nuova, la scarico e ricarico la pagina. */
-const BUILD = "20261116194745";
+const BUILD = "20261116210225";
 async function checkUpdate(){
   try {
     const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" });
